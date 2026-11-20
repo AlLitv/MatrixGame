@@ -12,6 +12,13 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 option(MATRIXGAME_BUILD_DLL "Build dll instead of exe" TRUE)
 option(MATRIXGAME_CHEATS "Enable cheats" TRUE)
+option(MATRIXGAME_SIM_HARNESS "Build the deterministic simulation harness (src/SimHarness.hpp)" FALSE)
+
+if(MATRIXGAME_SIM_HARNESS)
+    # Harness code is spread across MatrixGame and MatrixLib (deterministic allocator),
+    # so the define has to be visible to every target in the tree.
+    add_compile_definitions(MATRIXGAME_SIM_HARNESS)
+endif()
 
 if(MSVC)
     find_package(DIRECTX9 REQUIRED)
@@ -72,6 +79,12 @@ target_link_libraries(MatrixGame ZLIB)
 target_compile_options(MatrixGame PRIVATE ${COMPILE_OPTIONS})
 target_compile_definitions(MatrixGame PRIVATE ${COMPILE_DEFINITIONS})
 target_link_options(MatrixGame PRIVATE ${LINK_OPTIONS})
+
+if(MATRIXGAME_SIM_HARNESS AND MSVC)
+    # The harness reports RNG call sites as module offsets; MatrixGame.map turns
+    # those offsets back into function names.
+    target_link_options(MatrixGame PRIVATE /MAP)
+endif()
 
 install(
     TARGETS MatrixGame

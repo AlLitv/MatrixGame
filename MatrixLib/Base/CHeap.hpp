@@ -274,6 +274,19 @@ inline void *CHeap::AllocClearEx(void *buf, uint size, const char *file, int lin
 
 #endif
 
+#ifdef MATRIXGAME_SIM_HARNESS
+// Байт заливки свежих аллокаций для харнесса детерминизма.
+inline int CHeapSimFill(void) {
+    static int fill = -1;
+    if (fill < 0) {
+        wchar_t buf[16];
+        DWORD len = GetEnvironmentVariableW(L"MATRIXGAME_FILL", buf, 16);
+        fill = (len > 0 && len < 16) ? (int)(wcstoul(buf, NULL, 16) & 0xFF) : 0;
+    }
+    return fill;
+}
+#endif
+
 inline void *CHeap::Alloc(size_t size) {
     void *buf;
     if (this == NULL)
@@ -283,9 +296,11 @@ inline void *CHeap::Alloc(size_t size) {
     if (buf == NULL)
         AllocationError(size);
 #ifdef MATRIXGAME_SIM_HARNESS
-    // Детерминированный аллокатор: нули вместо мусора кучи. Это устраняет класс
-    // десинков «чтение неинициализированной памяти» (проверено харнессом).
-    memset(buf, 0, size);
+    // Детерминированный аллокатор: заливаем свежую память одним и тем же байтом.
+    // Значение берётся из MATRIXGAME_FILL (hex), по умолчанию 0. Сравнение
+    // прогонов с 0xCD и 0xAA показывает, какие поля читаются неинициализированными:
+    // у них в дампе и будет стоять байт заливки.
+    memset(buf, CHeapSimFill(), size);
 #endif
     return buf;
 }
