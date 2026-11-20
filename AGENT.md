@@ -126,22 +126,54 @@ The repository carries a local **CodeGraph** index (`.codegraph/`, ignores itsel
 
 ## 8. Determinism (netplay groundwork)
 
-The simulation can be made deterministic, and **two root causes of desync have already been found and fixed**:
+Three root causes of desync have been found so far; two of them are fixed structurally:
 
 1. **Pointer comparisons used as tie-breakers.** `CollisionCallback` (`MatrixRobot.cpp`) decided which of two head-on robots yields via `DWORD(pCurrBot) < DWORD(data->robot)`. Heap addresses differ between runs, so the winner differed and the battle desynced after a few seconds. Map objects now carry a stable creation-order id (`CMatrixMapStatic::m_Id` / `GetId()`), and both comparisons use it.
-2. **Reading uninitialised memory.** A field read before being written returns heap garbage that differs between runs. Under `MATRIXGAME_SIM_HARNESS` the engine allocator (`CHeap::Alloc`) zeroes the memory it hands out, which makes this whole class deterministic. The exact field is still unknown: it sits in the movement path, but it is none of the speed / slope-correction / forward / collision-weight fields.
+2. **The logic AI and the renderer shared one RNG stream.** `RND`/`FRND`/`IRND` expand to `rand()`, and visual effects call them from `Draw`. Every extra draw (a visible repair beam, a dust puff, a debris look) shifts the sequence the AI consumes, so what is on screen desyncs what happens in the world. The harness now keeps two streams: logic takes numbers from its own xorshift (seeded from `MATRIXGAME_SEED`), the whole `CFormMatrixGame::Draw` phase takes them from `rand()`. This moved the first cross-fill divergence from 6100 ms to 9630 ms of game time and, more importantly, made visual noise unable to affect the simulation at all.
+3. **Reading uninitialised memory.** A field read before being written returns heap garbage, which differs between processes. `CHeap::Alloc` zeroes its memory under the harness, which makes this class deterministic; the field-by-field cleanup is in progress.
+
+Fields that were provably read before being written and are now initialised: `CMatrixRobotAI` — `m_MovePathDist`, `m_MovePathDistFollow`, `m_MovePath[]`, `m_MoveTestPos`, `m_MoveTestChange`, `m_ZoneNear`, `m_NextTimeAblaze`, `m_NextTimeShorted`; `CMatrixRobot` — `m_BotRotAngle` (dead field, but it was full of garbage), `m_TimeWithBase`, `m_MaxHitPointInversed`. `SWeaponRepairData::m_Flags` still only has one bit cleared on allocation.
+
+What is left: at ~9630 ms the world diverges in `m_Speed` of one robot while **every** dumped field still matches and the logic RNG counters are identical, i.e. the differing input is not part of the robot object and not RNG. The differential harness is the tool to chase it (see below).
 
 The harness lives in `MatrixGame/src/SimHarness.{hpp,cpp}` and is inert unless `MATRIXGAME_SIM_HARNESS` is defined. Build it with:
 
 ```bat
-cmake -S . -B build-sim -A Win32 ^
-  "-DCMAKE_CXX_FLAGS=-DWINDOWS_IGNORE_PACKING_MISMATCH -DMATRIXGAME_SIM_HARNESS" ^
+cmake -S . -B build-sim -A Win32 -DMATRIXGAME_SIM_HARNESS=ON ^
+  "-DCMAKE_CXX_FLAGS=-DWINDOWS_IGNORE_PACKING_MISMATCH" ^
   "-DCMAKE_C_FLAGS=-DWINDOWS_IGNORE_PACKING_MISMATCH"
+cmake --build build-sim --config Release
 ```
 
-Environment switches: `MATRIXGAME_SIM` (autoplay, skip the menu), `MATRIXGAME_SEED`, `MATRIXGAME_FIXEDSTEP` (ms), `MATRIXGAME_MAXTICKS`, `MATRIXGAME_MAP` (force a map regardless of the menu), `MATRIXGAME_HASHLOG` (world hash every 100 ms), `MATRIXGAME_OBJLOG` (per-object dump), `MATRIXGAME_TRACE` (init stages and the crash address).
+The option is a normal CMake switch now (it defines `MATRIXGAME_SIM_HARNESS` for every target, because the allocator in `MatrixLib` needs it too) and it also enables `/MAP`, so RNG call sites reported as module offsets can be resolved to function names.
 
-How to use it: put the harness DLL into Space Rangers HD, play the same battle twice, compare the hash logs. Identical logs mean the run was deterministic. `tools/start-battle.cmd` launches the game with the right variables.
+Environment switches:
+
+| Variable | Meaning |
+| --- | --- |
+| `MATRIXGAME_SIM` | autoplay: skip the menu, start the battle |
+| `MATRIXGAME_SEED` | seed for both streams instead of `time(NULL)` |
+| `MATRIXGAME_FIXEDSTEP` | hard logic step in ms instead of the measured one |
+| `MATRIXGAME_MAXTICKS` | quit after this much game time, ms |
+| `MATRIXGAME_MAP` | force a map, ignoring the menu |
+| `MATRIXGAME_HASHLOG` | world hash (and RNG counters) every `MATRIXGAME_HASHSTEP` ms |
+| `MATRIXGAME_HASHSTEP` | log period, default 100 ms; 10 gives per-tick resolution |
+| `MATRIXGAME_OBJLOG` | per-object field dump, keyed by stable id |
+| `MATRIXGAME_RANDLOG` | `rand()` calls per return address, as a per-period delta |
+| `MATRIXGAME_FILL` | byte used to fill fresh allocations (hex), default `00` |
+| `MATRIXGAME_POISON` | bytes of stack to poison with the same byte, 0 = off |
+| `MATRIXGAME_TRACE` | init stages and the crash address |
+
+The differential technique: run the same battle twice with `MATRIXGAME_FILL=CD` and `MATRIXGAME_FILL=AA`. Anything the engine reads before writing it will differ between the two runs, so the first field that diverges is the uninitialised one. `tools/` has the whole loop:
+
+| File | What it does |
+| --- | --- |
+| `tools/Run-Sim.ps1` | runs one pass with the right variables and waits for exit |
+| `tools/simdiff.py` | compares two hash logs or two object dumps, reports the first diverging field |
+| `tools/randlog_sites.py` | compares RNG call-site histograms and names the function via `MatrixGame.map` |
+| `tools/gen_layout.py` | regenerates `SimLayout*.inc`, the field-offset tables the fill scanner uses |
+
+`MATRIXGAME_OBJLOG` also reports, per robot, `garb=` (how many dwords still hold the fill byte) and `gof=` (their offsets, resolvable through the `.layout` file written next to the log). That is how the list of uninitialised fields above was produced.
 
 ## 9. Pre-commit checklist
 
@@ -151,4 +183,4 @@ How to use it: put the harness DLL into Space Rangers HD, play the same battle t
 4. No new `new`/`delete`/`malloc` bypassing `CHeap`.
 5. `#include` case matches the actual file name.
 6. Commit message is short and in the style of the history (`Fix character case of includes`, `Slightly change CMakeLists for mingw`).
-7. If you touched movement, collision or AI code, re-run the determinism harness: two runs of the same battle must produce identical hash logs.
+7. If you touched movement, collision or AI code, re-run the determinism harness: two runs of the same battle must produce identical hash logs, and the `CD`/`AA` pair must stay identical too.

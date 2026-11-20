@@ -1,3 +1,7 @@
 build*/
 run*/
 bin/
+
+# Harness output (logs, object dumps, layout tables produced by the game run)
+tools/logs/
+tools/__pycache__/
