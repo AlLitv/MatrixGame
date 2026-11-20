@@ -340,6 +340,12 @@ public:
     int *GetGroupP() { return &m_Group; }
     float GetMaxSpeed() { return m_maxSpeed; }
     void SetMaxSpeed(float s) { m_maxSpeed = s; }
+#ifdef MATRIXGAME_SIM_HARNESS
+    float GetMaxRotationSpeed() { return m_maxRotationSpeed; }
+    float GetSpeedWaterCorr() { return m_SpeedWaterCorr; }
+    float GetSpeedSlopeCorrUp() { return m_SpeedSlopeCorrUp; }
+    float GetSpeedSlopeCorrDown() { return m_SpeedSlopeCorrDown; }
+#endif
     int GetOrdersInPool() { return m_OrdersInPool; }
     SOrder *GetOrder(int no) { return m_OrdersList + no; }
     CMatrixEffectSelection *GetSelection() { return m_Selection; }

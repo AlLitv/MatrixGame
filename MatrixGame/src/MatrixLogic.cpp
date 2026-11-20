@@ -5,6 +5,7 @@
 
 #include "stdafx.h"
 
+#include "SimHarness.hpp"
 #include "MatrixLogic.hpp"
 #include "MatrixObject.hpp"
 #include "MatrixObjectBuilding.hpp"
@@ -2757,6 +2758,10 @@ static bool Egg2(const D3DXVECTOR2 &center, CMatrixMapStatic *ms, DWORD user) {
 
 void CMatrixMapLogic::Takt(int step) {
     DTRACE();
+
+#ifdef MATRIXGAME_SIM_HARNESS
+    SimLogTakt(step);
+#endif
 
     if (g_RangersInterface) {
         g_RangersInterface->m_Takt();

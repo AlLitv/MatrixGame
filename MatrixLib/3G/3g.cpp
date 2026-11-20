@@ -439,6 +439,15 @@ int L3GRun() {
 
                 tt = smooths / SMOOTH_COUNT;
 
+#ifdef MATRIXGAME_SIM_HARNESS
+                // Харнесс детерминизма: жёсткий шаг вместо измеренного.
+                {
+                    const wchar_t *fixedStep = _wgetenv(L"MATRIXGAME_FIXEDSTEP");
+                    if (fixedStep && *fixedStep)
+                        tt = _wtoi(fixedStep);
+                }
+#endif
+
                 SRemindCore::Takt(tt);
                 g_FormCur->Takt(tt);
 #ifdef _DEBUG

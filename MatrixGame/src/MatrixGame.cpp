@@ -7,6 +7,7 @@
 
 #include "stdafx.h"
 
+#include "SimHarness.hpp"
 #include "MatrixGame.h"
 #include "MatrixMap.hpp"
 #include "MatrixFormGame.hpp"
@@ -77,7 +78,12 @@ int APIENTRY _tWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int) {
     }
 
     try {
+#ifdef MATRIXGAME_SIM_HARNESS
+        srand(SimSeed((unsigned)time(NULL)));
+        SimInstallCrashFilter();
+#else
         srand((unsigned)time(NULL));
+#endif
 
         MatrixGameInit(hInstance, NULL, map);
 
@@ -90,7 +96,15 @@ int APIENTRY _tWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int) {
         //*(buf-1)=1;
         // HFree(buf,NULL);
 
-        if (map) {
+#ifdef MATRIXGAME_SIM_HARNESS
+        // В режиме харнесса карта задаётся аргументом, но вместо CalcVis
+        // запускается обычный игровой цикл — бой играет сам себя.
+        const bool runMainLoop = (map == NULL) || SimModeEnabled();
+#else
+        const bool runMainLoop = (map == NULL);
+#endif
+
+        if (!runMainLoop) {
             FILE *file;
             file = fopen("calcvis.log", "a");
             CStr name(g_MatrixMap->MapName(), g_MatrixHeap);
@@ -188,10 +202,59 @@ void MatrixGameInit(HINSTANCE inst, HWND wnd, wchar *map, SRobotsSettings *set, 
 
     DTRACE();
 
+#ifdef MATRIXGAME_SIM_HARNESS
+    {
+        // Для сравнения прогонов карта должна быть одна и та же независимо
+        // от того, что выбрано в меню игры.
+        const wchar *forced = SimMapOverride();
+        if (forced)
+            map = (wchar *)forced;
+
+        CWStr mapLog(map ? map : L"<из конфига>", g_CacheHeap);
+        SimTraceW(mapLog.Get());
+    }
+#endif
+
     g_MatrixHeap = HNew(NULL) CHeap;
 
     CFile::AddPackFile(L"DATA\\robots.pkg", NULL);
     CFile::OpenPackFiles();
+#ifdef MATRIXGAME_SIM_HARNESS
+    SimTrace("packs opened");
+
+    {
+        // Имя карты в паке может отличаться регистром или расширением —
+        // спрашиваем у самого движка, как путь называется на самом деле.
+        const wchar *forced = SimMapOverride();
+        if (forced) {
+            static wchar s_mapPath[260];
+            static const wchar *kPrefixes[] = {L"Matrix\\Map\\", L"MATRIX\\MAP\\", L""};
+
+            CWStr probe(g_CacheHeap);
+            CWStr candidate(g_CacheHeap);
+            bool resolved = false;
+
+            for (int i = 0; i < 3 && !resolved; ++i) {
+                candidate.Set(kPrefixes[i]);
+                candidate += forced;
+
+                if (CFile::FileExist(probe, candidate.Get(), L"cmap")) {
+                    wcsncpy(s_mapPath, probe.Get(), 259);
+                    s_mapPath[259] = 0;
+                    map = s_mapPath;
+                    resolved = true;
+
+                    SimTrace("map resolved:");
+                    SimTraceW(s_mapPath);
+                }
+            }
+
+            if (!resolved) {
+                SimTrace("map NOT resolved, falling back to the game's choice");
+            }
+        }
+    }
+#endif
 
     CLoadProgress lp;
     g_LoadProgress = &lp;
@@ -211,6 +274,9 @@ void MatrixGameInit(HINSTANCE inst, HWND wnd, wchar *map, SRobotsSettings *set, 
         stor_cfg.Load(conf_file);
         stor_cfg_present = true;
     }
+#ifdef MATRIXGAME_SIM_HARNESS
+    SimTrace(stor_cfg_present ? "cfg found" : "cfg MISSING");
+#endif
 
     g_MatrixData = HNew(g_MatrixHeap) CBlockPar(1, g_MatrixHeap);
     if (stor_cfg_present) {
@@ -229,6 +295,12 @@ void MatrixGameInit(HINSTANCE inst, HWND wnd, wchar *map, SRobotsSettings *set, 
 
     {
         CBlockPar *repl = g_MatrixData->BlockGetAdd(PAR_REPLACE);
+#ifdef MATRIXGAME_SIM_HARNESS
+        SimTrace("matrix data loaded");
+        SimTrace(g_MatrixData->BlockGetNE(L"Config") ? "Config block ok" : "Config block MISSING");
+        SimTrace(g_MatrixData->BlockGetNE(L"Side") ? "Side block ok" : "Side block MISSING");
+        SimTrace(g_MatrixData->BlockGetNE(L"AIRobotType") ? "AIRobotType ok" : "AIRobotType MISSING");
+#endif
 
         // init menu replaces
 
@@ -278,6 +350,9 @@ void MatrixGameInit(HINSTANCE inst, HWND wnd, wchar *map, SRobotsSettings *set, 
 
     CacheInit();
     DCP();
+#ifdef MATRIXGAME_SIM_HARNESS
+    SimTrace("cache init");
+#endif
 
     /*if (g_RangersInterface)
     {
@@ -290,6 +365,19 @@ void MatrixGameInit(HINSTANCE inst, HWND wnd, wchar *map, SRobotsSettings *set, 
     g_MatrixData->BlockGet(L"Config")->SaveInTextFile(L"g_ConfigDump.txt");
 #endif
 
+#ifdef MATRIXGAME_SIM_HARNESS
+    if (SimModeEnabled()) {
+        // Конфиг SR2 HD рассчитан на режим DLL: параметры видео приходят из игры.
+        // Для самостоятельного запуска харнесса подставляем их сами.
+        CBlockPar *cfg = g_MatrixData->BlockGetNE(L"Config");
+        if (cfg) {
+            cfg->ParSet(L"Resolution", L"1024,768");
+            cfg->ParSet(L"FullScreen", L"0,32,0");
+        }
+        SimTrace("video params injected");
+    }
+#endif
+
     if (set)
         L3GInitAsDLL(inst, *g_MatrixData->BlockGet(L"Config"), L"MatrixGame", L"Matrix Game", wnd, set->FDirect3D,
                      set->FD3DDevice);
@@ -300,6 +388,9 @@ void MatrixGameInit(HINSTANCE inst, HWND wnd, wchar *map, SRobotsSettings *set, 
         g_ScreenX = set->m_ResolutionX;
         g_ScreenY = set->m_ResolutionY;
     }
+#ifdef MATRIXGAME_SIM_HARNESS
+    SimTrace("3g initialized");
+#endif
 
     g_Render = HNew(g_MatrixHeap) CRenderPipeline;  // prepare pipelines
 
@@ -314,6 +405,9 @@ void MatrixGameInit(HINSTANCE inst, HWND wnd, wchar *map, SRobotsSettings *set, 
         g_Config.ApplySettings(set);
         g_Sampler.ApplySettings(set);
     }
+#ifdef MATRIXGAME_SIM_HARNESS
+    SimTrace("config applied");
+#endif
 
     DCP();
 
@@ -322,10 +416,16 @@ void MatrixGameInit(HINSTANCE inst, HWND wnd, wchar *map, SRobotsSettings *set, 
     g_MatrixMap->LoadSide(*g_MatrixData->BlockGet(L"Side"));
     // g_MatrixMap->LoadTactics(*g_MatrixData->BlockGet(L"Tactics"));
     g_IFaceList = HNew(g_MatrixHeap) CIFaceList;
+#ifdef MATRIXGAME_SIM_HARNESS
+    SimTrace("sides loaded");
+#endif
 
     // load new map
     DCP();
     g_MatrixMap->RobotPreload();
+#ifdef MATRIXGAME_SIM_HARNESS
+    SimTrace("robots preloaded");
+#endif
 
     CStorage stor(g_CacheHeap);
     DCP();
@@ -347,16 +447,28 @@ void MatrixGameInit(HINSTANCE inst, HWND wnd, wchar *map, SRobotsSettings *set, 
 
     stor.Load(mapname);
     DCP();
+#ifdef MATRIXGAME_SIM_HARNESS
+    SimTrace("map storage loaded");
+#endif
 
     if (0 > g_MatrixMap->PrepareMap(stor, mapname)) {
         ERROR_S(L"Unable to load map. Error happens.");
     }
+#ifdef MATRIXGAME_SIM_HARNESS
+    SimTrace("map prepared");
+#endif
 
     CWStr mn(g_MatrixMap->MapName(), g_MatrixHeap);
     mn.LowerCase();
     if (mn.Find(L"demo") >= 0) {
         SETFLAG(g_MatrixMap->m_Flags, MMFLAG_AUTOMATIC_MODE | MMFLAG_FLYCAM | MMFLAG_FULLAUTO);
     }
+#ifdef MATRIXGAME_SIM_HARNESS
+    // Автоигра: обе стороны под ИИ, камера сама, по завершении бой выходит.
+    if (SimModeEnabled()) {
+        SETFLAG(g_MatrixMap->m_Flags, MMFLAG_AUTOMATIC_MODE | MMFLAG_FLYCAM | MMFLAG_FULLAUTO);
+    }
+#endif
 
     g_MatrixMap->CalcCannonPlace();
     SSpecialBot::LoadAIRobotType(*g_MatrixData->BlockGet(L"AIRobotType"));

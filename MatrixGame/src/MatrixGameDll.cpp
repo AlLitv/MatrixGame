@@ -5,6 +5,8 @@
 
 #include "stdafx.h"
 
+#include "SimHarness.hpp"
+
 #include "MatrixGameDll.hpp"
 #include "MatrixGame.h"
 #include "MatrixMap.hpp"
@@ -245,7 +247,12 @@ int __stdcall Run(HINSTANCE hinst, HWND hwnd, wchar *map, SRobotsSettings *set, 
                   wchar *txt_win, wchar *txt_loss, wchar *planet, SRobotGameState *rgs) {
     // try {
 
+#ifdef MATRIXGAME_SIM_HARNESS
+    srand(SimSeed((unsigned)time(NULL)));
+    SimInstallCrashFilter();
+#else
     srand((unsigned)time(NULL));
+#endif
     SetMaxCameraDistance(set->m_MaxDistance);
     MatrixGameInit(hinst, hwnd, map, set, lang, txt_start, txt_win, txt_loss, planet);
     CFormMatrixGame *formgame = HNew(NULL) CFormMatrixGame();

@@ -22,6 +22,13 @@
 // TODO: reference additional headers your program requires here
 #include "../../MatrixLib/3G/3g.pch"
 
+#ifdef MATRIXGAME_SIM_HARNESS
+// Харнесс детерминизма: считаем вызовы ГПСЧ. Макрос объявлен до игровых
+// заголовков, потому что RND/FRND в Math3D.hpp зовут rand() напрямую.
+unsigned SimRand(void);
+#define rand() SimRand()
+#endif
+
 #include "../../MatrixLib/3G/3g.hpp"
 #include "../../MatrixLib/3G/VectorObject.hpp"
 #include "../../MatrixLib/3G/CBillboard.hpp"
