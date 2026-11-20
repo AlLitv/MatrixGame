@@ -282,6 +282,11 @@ inline void *CHeap::Alloc(size_t size) {
         buf = HeapAlloc(m_Heap, m_Flags, size);
     if (buf == NULL)
         AllocationError(size);
+#ifdef MATRIXGAME_SIM_HARNESS
+    // Детерминированный аллокатор: нули вместо мусора кучи. Это устраняет класс
+    // десинков «чтение неинициализированной памяти» (проверено харнессом).
+    memset(buf, 0, size);
+#endif
     return buf;
 }
 
