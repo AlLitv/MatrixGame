@@ -14,6 +14,8 @@
 #include "MatrixSkinManager.hpp"
 #include "MatrixFlyer.hpp"
 
+DWORD CMatrixMapStatic::s_NextId = 0;
+
 bool FreeObjResources(DWORD user) {
     DTRACE();
     CMatrixMapStatic *obj = (CMatrixMapStatic *)user;

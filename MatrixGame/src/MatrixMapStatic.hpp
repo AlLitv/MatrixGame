@@ -202,6 +202,11 @@ class CMatrixMapStatic : public CMain {
     int m_ObjectStateTTLAblaze;
     int m_ObjectStateTTLShorted;
 
+    // Стабильный id, присвоенный в порядке создания. Нужен как детерминированный
+    // тай-брейк вместо сравнения указателей (адреса в куче между запусками разные).
+    DWORD m_Id;
+    static DWORD s_NextId;
+
     int m_Z;
 
     static PCMatrixMapStatic objects[MAX_OBJECTS_PER_SCREEN];
@@ -322,6 +327,8 @@ public:
       : CMain(), m_RChange(0xffffffff), m_LastVisFrame(0xFFFFFFFF), m_NearBaseCnt(0), m_IntersectFlagTracer(0xFFFFFFFF),
         m_IntersectFlagFindObjects(0xFFFFFFFF), m_ObjectState(0), m_ObjectStateTTLAblaze(0), m_ObjectStateTTLShorted(0),
         m_InCnt(0), m_PrevLogicTemp(NULL), m_NextLogicTemp(NULL), m_RemindCore(FreeObjResources, (DWORD)this) {
+        m_Id = s_NextId++;
+
         m_Core = SObjectCore::Create(this);
 
         m_Core->m_TerainColor = 0xFFFFFFFF;
@@ -399,6 +406,7 @@ public:
     static CMatrixMapStatic *GetVisObj(int i);
 
     inline EObjectType GetObjectType(void) const { return m_Core->m_Type; }
+    inline DWORD GetId(void) const { return m_Id; }
     inline const D3DXVECTOR3 &GetGeoCenter(void) const { return m_Core->m_GeoCenter; }
     inline const D3DXMATRIX &GetMatrix(void) const { return m_Core->m_Matrix; }
     inline float GetRadius(void) const { return m_Core->m_Radius; }

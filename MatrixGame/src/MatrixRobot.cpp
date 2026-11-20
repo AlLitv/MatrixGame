@@ -2902,7 +2902,7 @@ static bool CollisionCallback(const D3DXVECTOR3 &fpos, CMatrixMapStatic *pObject
                                     0) {  // И движется приблезительно в одну сторону
 
                                     if ((pCurrBot->m_Velocity.x * vDist.x + pCurrBot->m_Velocity.y * vDist.y) > 0 &&
-                                        DWORD(pCurrBot) < DWORD(data->robot))
+                                        pCurrBot->GetId() < data->robot->GetId())
                                         ;  // Только один из двух роботов моежт двигатся
                                     else {
                                         data->stop = true;
@@ -3004,7 +3004,7 @@ static bool CollisionCallback(const D3DXVECTOR3 &fpos, CMatrixMapStatic *pObject
                                 0) {  // И движется приблезительно в одну сторону
 
                                 if ((pCurrBot->m_Velocity.x * vDist.x + pCurrBot->m_Velocity.y * vDist.y) > 0 &&
-                                    DWORD(pCurrBot) < DWORD(data->robot))
+                                    pCurrBot->GetId() < data->robot->GetId())
                                     ;  // Только один из двух роботов моежт двигатся
                                 else {
                                     data->far_col = true;
