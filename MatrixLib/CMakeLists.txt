@@ -102,6 +102,10 @@ if(MSVC)
     source_group("Base\\Header Files" FILES ${BASE_HEADERS})
     source_group("Bitmap\\Source Files" FILES ${BITMAP_SOURCES})
     source_group("Bitmap\\Header Files" FILES ${BITMAP_HEADERS})
+
+    # The hand-written MASM source has no exception handlers, but ml.exe does not mark
+    # the object as SAFESEH-safe by default, which breaks linking with /SAFESEH.
+    set_source_files_properties(Bitmap/asharpen.asm PROPERTIES COMPILE_OPTIONS "/safeseh")
 endif()
 
 target_compile_options(MatrixLib PRIVATE ${COMPILE_OPTIONS})

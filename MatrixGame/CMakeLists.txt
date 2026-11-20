@@ -37,4 +37,10 @@ add_matrix_directory(src/Effects)
 add_matrix_directory(src/Interface)
 add_matrix_directory(src/Logic)
 
+if(MSVC)
+    # MSVC 19.3x crashes with C1001 (codegen pass) while compiling this translation unit
+    # at /Ob2. Disabling inlining for this file only is enough to work around it.
+    set_source_files_properties(src/MatrixLogic.cpp PROPERTIES COMPILE_OPTIONS "/Od")
+endif()
+
 source_group("Resources" FILES ${MATRIX_RESOURCES})

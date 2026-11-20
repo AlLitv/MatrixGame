@@ -26,6 +26,12 @@ add_subdirectory(MatrixGame)
 target_link_libraries(MatrixGame winmm)
 target_link_libraries(MatrixGame ${DIRECTX9_LIBRARIES})
 
+if(MSVC)
+    # DxErr.lib from the June 2010 SDK references __vsnwprintf, which the UCRT no longer
+    # exports. The legacy stdio shim library provides it.
+    target_link_libraries(MatrixGame legacy_stdio_definitions)
+endif()
+
 list(APPEND COMPILE_DEFINITIONS MATRIXGAME_EXPORTS USE_PNGLIB $<$<CONFIG:Release>:ASSERT_OFF>)
 
 if(MSVC)
