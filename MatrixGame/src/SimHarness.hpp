@@ -10,8 +10,16 @@
 //   MATRIXGAME_FIXEDSTEP=<ms>     жёсткий шаг логики вместо измеренного
 //   MATRIXGAME_MAXTICKS=<ms>      через столько мс игрового времени выйти
 //   MATRIXGAME_HASHLOG=<file>     куда писать хеш состояния мира
+//   MATRIXGAME_HASHSTEP=<ms>      период дампа (по умолчанию 100 мс)
+//   MATRIXGAME_OBJLOG=<file>      дамп полей объектов (ключ — стабильный id)
+//   MATRIXGAME_RANDLOG=<file>     вызовы rand() по адресам возврата, с дельтой за период
+//   MATRIXGAME_FILL=<hex>         байт заливки свежих аллокаций (дифференциальный режим)
+//   MATRIXGAME_TRACE=<file>       трассировка этапов инициализации и падений
+//   MATRIXGAME_MAP=<name>         принудительная карта
 
 #pragma once
+
+#include <stdio.h>
 
 #ifdef MATRIXGAME_SIM_HARNESS
 
@@ -43,5 +51,27 @@ void SimTraceW(const wchar *message);
 // разошлась ли последовательность ГПСЧ у двух прогонов.
 unsigned SimRand(void);
 unsigned long long SimRandCalls(void);
+
+// Счётчики ремонтных лучей: сколько объектов создано, сколько раз Draw
+// вызывался, сколько раз прошёл проверку флага. Нужны, чтобы отличить
+// «луч не нарисовали» от «луча нет». Значения печатаются в хеш-логе.
+#define SIMREP_ALLOC 0
+#define SIMREP_ENTER 1
+#define SIMREP_PASS  2
+void SimRepairStat(int ev);
+
+// Фаза выполнения: в фазе отрисовки rand() берётся из отдельного потока, чтобы
+// визуальные эффекты не сдвигали последовательность, которую использует логика.
+#define SIMPHASE_LOGIC  0
+#define SIMPHASE_VISUAL 1
+void SimSetPhase(int phase);
+int SimPhase(void);
+
+// Сколько чисел выдал именно логический поток (визуальный не считается).
+unsigned long long SimLogicRandCalls(void);
+
+// Печатает в файл таблицу «имя поля -> смещение» для классов робота.
+// Нужна, чтобы переводить смещения, найденные сканером заливки, в имена полей.
+void SimDumpLayouts(FILE *f);
 
 #endif

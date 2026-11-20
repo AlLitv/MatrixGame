@@ -147,6 +147,11 @@ class CMatrixRobot : public CMatrixMapStatic {
     EAnimation m_Animation;
     CMatrixBuilding *m_Base;  //база из который вышел робот
 
+public:
+#ifdef MATRIXGAME_SIM_HARNESS
+    static void SimDumpLayout(FILE *f);
+#endif
+
 protected:
     // hitpoint
     CMatrixProgressBar m_PB;

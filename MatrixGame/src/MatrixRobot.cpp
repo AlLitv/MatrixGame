@@ -5,6 +5,7 @@
 
 #include "stdafx.h"
 
+#include "SimHarness.hpp"
 #include "MatrixRobot.hpp"
 #include "MatrixObjectBuilding.hpp"
 #include "Logic/MatrixRule.h"
@@ -20,8 +21,15 @@ void SWeaponRepairData::Release(void) {
 }
 
 void SWeaponRepairData::Draw(bool now) {
+#ifdef MATRIXGAME_SIM_HARNESS
+    SimRepairStat(SIMREP_ENTER);
+#endif
     if (!FLAG(m_Flags, CAN_BE_DRAWN))
         return;
+
+#ifdef MATRIXGAME_SIM_HARNESS
+    SimRepairStat(SIMREP_PASS);
+#endif
 
     BYTE a = g_MatrixMap->IsPaused() ? 240 : (BYTE(FRND(128) + 128));
 
@@ -70,6 +78,9 @@ void SWeaponRepairData::Update(SMatrixRobotUnit *unit) {
 SWeaponRepairData *SWeaponRepairData::Allocate(void) {
     SWeaponRepairData *r = (SWeaponRepairData *)HAlloc(sizeof(SWeaponRepairData), g_MatrixHeap);
 
+#ifdef MATRIXGAME_SIM_HARNESS
+    SimRepairStat(SIMREP_ALLOC);
+#endif
     r->m_b0.CBillboard::CBillboard(TRACE_PARAM_CALL D3DXVECTOR3(-1000, -1000, -1000), 5, 0, 0xFFFFFFFF,
                                    CMatrixEffect::GetBBTexI(BBT_REPGLOWEND));
     r->m_b1.CBillboard::CBillboard(TRACE_PARAM_CALL D3DXVECTOR3(-1000, -1000, -1000), 10, 0, 0xFFFFFFFF,
@@ -122,6 +133,16 @@ CMatrixRobotAI::CMatrixRobotAI()
 
     m_MovePathCnt = 0;
     m_MovePathCur = 0;
+    m_MovePathDist = 0.0f;
+    m_MovePathDistFollow = 0.0f;
+    ZeroMemory(m_MovePath, sizeof(m_MovePath));
+
+    m_MoveTestPos = D3DXVECTOR2(0, 0);
+    m_MoveTestChange = 0;
+
+    m_ZoneNear = -1;
+    m_NextTimeAblaze = 0;
+    m_NextTimeShorted = 0;
 
     m_defHitPoint = Float2Int(m_HitPoint);
     m_nLastCollideFrame = 0;
@@ -5463,3 +5484,11 @@ bool CMatrixRobotAI::CheckFireDist(const D3DXVECTOR3 &point) {
 //    }
 //
 //}
+#ifdef MATRIXGAME_SIM_HARNESS
+// Таблица «поле -> смещение» для AI-робота (см. CMatrixRobot::SimDumpLayout).
+void CMatrixRobotAI::SimDumpLayout(FILE *f) {
+#define OFFSET_OF(cls, member) fprintf(f, "%u %s\n", (unsigned)offsetof(cls, member), #member)
+#include "SimLayoutAI.inc"
+#undef OFFSET_OF
+}
+#endif

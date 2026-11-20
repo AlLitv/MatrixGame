@@ -271,6 +271,10 @@ public:
     CMatrixMapStatic *m_NextStackItem;
     CMatrixMapStatic *m_PrevStackItem;
 
+#ifdef MATRIXGAME_SIM_HARNESS
+    static void SimDumpLayout(FILE *f);
+#endif
+
     bool IsNotOnMinimap(void) const { return FLAG(m_RChange, MR_MiniMap); }
     void SetInvulnerability(void) { SETFLAG(m_ObjectState, OBJECT_STATE_INVULNERABLE); }
     void ResetInvulnerability(void) { RESETFLAG(m_ObjectState, OBJECT_STATE_INVULNERABLE); }
@@ -407,6 +411,9 @@ public:
 
     inline EObjectType GetObjectType(void) const { return m_Core->m_Type; }
     inline DWORD GetId(void) const { return m_Id; }
+#ifdef MATRIXGAME_SIM_HARNESS
+    inline float GetCamDistSq(void) const { return m_CamDistSq; }
+#endif
     inline const D3DXVECTOR3 &GetGeoCenter(void) const { return m_Core->m_GeoCenter; }
     inline const D3DXMATRIX &GetMatrix(void) const { return m_Core->m_Matrix; }
     inline float GetRadius(void) const { return m_Core->m_Radius; }

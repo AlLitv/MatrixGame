@@ -5,6 +5,7 @@
 
 #include "stdafx.h"
 
+#include "SimHarness.hpp"
 #include "MatrixMap.hpp"
 #include "MatrixMapStatic.hpp"
 #include "MatrixObject.hpp"
@@ -881,3 +882,12 @@ void CMatrixMapStatic::OnEndOfDraw(void) {
     m_FirstVisNew = NULL;
     m_LastVisNew = NULL;
 }
+
+#ifdef MATRIXGAME_SIM_HARNESS
+// Таблица «поле -> смещение» для базового класса объекта карты.
+void CMatrixMapStatic::SimDumpLayout(FILE *f) {
+#define OFFSET_OF(cls, member) fprintf(f, "%u %s\n", (unsigned)offsetof(cls, member), #member)
+#include "SimLayoutStatic.inc"
+#undef OFFSET_OF
+}
+#endif

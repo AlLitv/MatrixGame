@@ -5,6 +5,7 @@
 
 #include "stdafx.h"
 
+#include "SimHarness.hpp"
 #include "MatrixObject.hpp"
 #include "MatrixObjectBuilding.hpp"
 #include "MatrixObjectRobot.hpp"
@@ -40,6 +41,9 @@ CMatrixRobot::CMatrixRobot() : CMatrixMapStatic(), m_Animation(ANIMATION_OFF), m
     m_HullForward = D3DXVECTOR3(0, 0, 0);
 
     m_HullRotAngle = 0;
+    m_BotRotAngle = 0;
+    m_TimeWithBase = 0;
+    m_MaxHitPointInversed = 0;
 
     m_Speed = 0;
     m_RotSpeed = 0;
@@ -1735,3 +1739,12 @@ bool CMatrixRobot::InRect(const CRect &rect) const {
 
     return false;
 }
+#ifdef MATRIXGAME_SIM_HARNESS
+// Таблица «поле -> смещение» для робота. Нужна сканеру заливки: он находит
+// смещения, в которых остался байт заливки, а по таблице видно имя поля.
+void CMatrixRobot::SimDumpLayout(FILE *f) {
+#define OFFSET_OF(cls, member) fprintf(f, "%u %s\n", (unsigned)offsetof(cls, member), #member)
+#include "SimLayoutRobot.inc"
+#undef OFFSET_OF
+}
+#endif

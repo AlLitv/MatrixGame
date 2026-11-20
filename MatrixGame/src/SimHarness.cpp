@@ -14,6 +14,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <intrin.h>
 
 // stdafx.h подменяет rand() на SimRand(), а сама обёртка должна звать настоящий.
 #undef rand
@@ -21,6 +22,61 @@
 namespace {
 
 unsigned long long g_randCalls = 0;
+
+// Два независимых потока ГПСЧ. Логика берёт числа из своего потока (он же
+// уходит в лог и сравнивается между прогонами), отрисовка — из потока libc,
+// потому что количество вызовов в кадре зависит от того, что видно на экране,
+// и не должно влиять на симуляцию.
+int g_simPhase = SIMPHASE_LOGIC;
+unsigned int g_logicRng = 0;
+bool g_logicRngSeeded = false;
+unsigned long long g_logicCalls = 0;
+
+void LogicRngSeedOnce(void);
+
+// Учёт вызовов ГПСЧ по адресам возврата. Когда два прогона расходятся по числу
+// вызовов rand(), видно, какая именно функция сгенерировала лишние числа —
+// дальше остаётся прочитать её и найти ветвление по неинициализированному полю.
+struct SRandSite {
+    void *addr;
+    unsigned long long count;
+    unsigned long long reported;
+};
+
+const int RAND_SITES_MAX = 512;
+SRandSite g_sites[RAND_SITES_MAX];
+int g_sitesCnt = 0;
+unsigned long long g_sitesOverflow = 0;
+
+void RandRecord(void *addr) {
+    for (int i = 0; i < g_sitesCnt; ++i) {
+        if (g_sites[i].addr == addr) {
+            ++g_sites[i].count;
+            return;
+        }
+    }
+    if (g_sitesCnt < RAND_SITES_MAX) {
+        g_sites[g_sitesCnt].addr = addr;
+        g_sites[g_sitesCnt].count = 1;
+        g_sites[g_sitesCnt].reported = 0;
+        ++g_sitesCnt;
+    }
+    else {
+        ++g_sitesOverflow;
+    }
+}
+
+// Смещение адреса от начала модуля: одинаково у любых двух запусков, в отличие
+// от абсолютного адреса, и переводится в имя функции по .map-файлу линкера.
+unsigned long long ModuleOffset(void *addr) {
+    HMODULE mod = NULL;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCWSTR)addr, &mod) ||
+        !mod)
+        return 0;
+
+    return (unsigned long long)((unsigned char *)addr - (unsigned char *)mod);
+}
 
 const wchar_t *EnvStr(const wchar_t *name) {
     const wchar_t *v = _wgetenv(name);
@@ -30,6 +86,69 @@ const wchar_t *EnvStr(const wchar_t *name) {
 int EnvInt(const wchar_t *name) {
     const wchar_t *v = EnvStr(name);
     return v ? _wtoi(v) : 0;
+}
+
+// Байт заливки свежих аллокаций (тот же, что использует CHeap::Alloc).
+unsigned char SimFillByte(void) {
+    const wchar_t *v = EnvStr(L"MATRIXGAME_FILL");
+    return v ? (unsigned char)(wcstoul(v, NULL, 16) & 0xFF) : 0;
+}
+
+// Ищет в памяти объекта 32-битные слова, оставшиеся от заливки. Это и есть
+// список полей, которые никто не инициализировал: смещения печатаются в
+// obj-логе, а имена берутся из таблицы, которую пишет SimDumpLayouts.
+int ScanFill(const void *obj, size_t size, unsigned char fill, unsigned *offsets, int maxOut) {
+    const unsigned pattern = (unsigned)fill * 0x01010101u;
+    const unsigned *words = (const unsigned *)obj;
+
+    int found = 0;
+    for (size_t off = 0; off + 4 <= size; off += 4) {
+        if (words[off / 4] != pattern)
+            continue;
+        if (found < maxOut)
+            offsets[found] = (unsigned)off;
+        ++found;
+    }
+    return found;
+}
+
+void LogicRngSeedOnce(void) {
+    if (g_logicRngSeeded)
+        return;
+
+    const wchar_t *v = EnvStr(L"MATRIXGAME_SEED");
+    const unsigned seed = v ? (unsigned)_wtoi64(v) : 12345;
+    // xorshift не любит нулевое состояние.
+    g_logicRng = seed ? seed : 0x9E3779B9;
+    g_logicRngSeeded = true;
+}
+
+unsigned LogicRngNext(void) {
+    LogicRngSeedOnce();
+
+    // xorshift32: дешёвый, без таблиц и без обращения к памяти.
+    unsigned x = g_logicRng;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    g_logicRng = x;
+    return x;
+}
+
+// Заливка стека тем же байтом, что и куча. Рекурсия спускается вниз по стеку,
+// поэтому неинициализированные локальные переменные логики получают известное
+// значение, и дифференциальный прогон 0xCD/0xAA ловит и их тоже.
+__declspec(noinline) void PoisonStackRec(unsigned char fill, int left) {
+    volatile unsigned char buf[512];
+    for (int i = 0; i < 512; ++i)
+        buf[i] = fill;
+    if (left > 512)
+        PoisonStackRec(fill, left - 512);
+}
+
+void PoisonStack(int bytes, unsigned char fill) {
+    if (bytes > 512)
+        PoisonStackRec(fill, bytes - 512);
 }
 
 unsigned long long Fnv1a(unsigned long long h, const void *data, size_t len) {
@@ -69,9 +188,13 @@ unsigned long long HashWorld(int *objectsOut) {
     return acc ^ ((unsigned long long)count << 47);
 }
 
-// Дамп объектов для поиска первого разошедшегося: строки сортируются по
-// (тип, сторона, X, Y), поэтому порядок связного списка не важен.
+// Дамп объектов для поиска первого разошедшегося. Строки ключуются стабильным
+// id объекта (GetId), поэтому порядок связного списка не важен, а сравнение
+// идёт поле в поле. Перечень полей подобран так, чтобы покрыть всю логику
+// движения/заданий: расхождение в любом из них видно до того, как разъедутся
+// координаты.
 struct SObjRec {
+    DWORD id;
     int type;
     int side;
     float x;
@@ -79,6 +202,7 @@ struct SObjRec {
     float vx;
     float vy;
     float speed;
+    float rotspeed_obj;
     float ang;
     int state;
     // Поля скорости/коррекции — чтобы увидеть, какое из них неинициализировано.
@@ -89,20 +213,50 @@ struct SObjRec {
     float rotspeed;
     float grpsp;
     float colsp;
+    // Ориентация корпуса и башни.
+    float fx;
+    float fy;
+    float hfx;
+    float hfy;
+    // Задание и путь.
+    int order;
+    int phase;
+    float p1;
+    float p2;
+    float p3;
+    int p4;
+    int zc;
+    int zd;
+    int zpnext;
+    int zpcnt;
+    int mpcnt;
+    int mpcur;
+    int dx;
+    int dy;
+    int mx;
+    int my;
+    int cols;
+    float mdist;
+    float mfollow;
+    // Ремонтные лучи: их отрисовка тоже жрёт rand(), поэтому важно видеть,
+    // в каком состоянии она находится (данные есть / луч помечен как видимый).
+    int hav;
+    int wcnt;
+    int repcnt;
+    int repflag;
+    int camsq;
+    // Незаписанные поля объекта: количество слов с байтом заливки и их смещения.
+    int garb;
+    int gofcnt;
+    unsigned gof[24];
 };
 
 int __cdecl ObjRecCmp(const void *a, const void *b) {
     const SObjRec *p = (const SObjRec *)a;
     const SObjRec *q = (const SObjRec *)b;
 
-    if (p->type != q->type)
-        return p->type - q->type;
-    if (p->side != q->side)
-        return p->side - q->side;
-    if (p->x != q->x)
-        return (p->x < q->x) ? -1 : 1;
-    if (p->y != q->y)
-        return (p->y < q->y) ? -1 : 1;
+    if (p->id != q->id)
+        return (p->id < q->id) ? -1 : 1;
     return 0;
 }
 
@@ -114,13 +268,20 @@ void DumpObjects(FILE *f, int time) {
         const D3DXVECTOR3 &pos = ms->GetGeoCenter();
 
         SObjRec &r = recs[count];
+        memset(&r, 0, sizeof(r));
+        r.id = ms->GetId();
         r.type = (int)ms->GetObjectType();
         r.side = ms->GetSide();
         r.x = pos.x;
         r.y = pos.y;
-        r.vx = r.vy = r.speed = r.ang = 0.0f;
         r.state = -1;
-        r.maxsp = r.wcorr = r.scup = r.scdown = r.rotspeed = r.grpsp = r.colsp = 0.0f;
+        r.order = r.phase = r.p4 = -1;
+        r.zc = r.zd = r.zpnext = r.zpcnt = r.mpcnt = r.mpcur = -1;
+        r.dx = r.dy = r.mx = r.my = r.cols = -1;
+        r.hav = r.wcnt = r.repcnt = r.repflag = -1;
+        r.camsq = (int)ms->GetCamDistSq();
+        r.garb = -1;
+        r.gofcnt = 0;
 
         if (r.type == OBJECT_TYPE_ROBOTAI) {
             CMatrixRobotAI *robot = ms->AsRobot();
@@ -128,6 +289,7 @@ void DumpObjects(FILE *f, int time) {
                 r.vx = robot->m_Velocity.x;
                 r.vy = robot->m_Velocity.y;
                 r.speed = robot->m_Speed;
+                r.rotspeed_obj = robot->m_RotSpeed;
                 r.ang = robot->m_BotRotAngle;
                 r.state = (int)robot->m_CurrState;
                 r.maxsp = robot->GetMaxSpeed();
@@ -137,6 +299,52 @@ void DumpObjects(FILE *f, int time) {
                 r.rotspeed = robot->GetMaxRotationSpeed();
                 r.grpsp = robot->m_GroupSpeed;
                 r.colsp = robot->m_ColSpeed;
+                r.fx = robot->m_Forward.x;
+                r.fy = robot->m_Forward.y;
+                r.hfx = robot->m_HullForward.x;
+                r.hfy = robot->m_HullForward.y;
+                if (robot->GetOrdersInPool() > 0) {
+                    // Первый ордер в пуле — тот, который робот выполняет сейчас.
+                    const SOrder *o = robot->GetOrder(0);
+                    r.order = (int)o->GetOrderType();
+                    r.phase = (int)o->GetOrderPhase();
+                    r.p1 = o->m_Param1;
+                    r.p2 = o->m_Param2;
+                    r.p3 = o->m_Param3;
+                    r.p4 = o->m_Param4;
+                }
+                r.zc = robot->GetZoneCur();
+                r.zd = robot->GetZoneDes();
+                r.zpnext = robot->GetZonePathNext();
+                r.zpcnt = robot->GetZonePathCnt();
+                r.mpcnt = robot->GetMovePathCnt();
+                r.mpcur = robot->GetMovePathCur();
+                r.dx = robot->GetDesX();
+                r.dy = robot->GetDesY();
+                r.mx = robot->GetMapPosX();
+                r.my = robot->GetMapPosY();
+                r.cols = robot->GetCols();
+                r.mdist = robot->GetMovePathDist();
+                r.mfollow = robot->GetMovePathDistFollow();
+
+                r.hav = robot->HaveRepair();
+                r.wcnt = robot->GetWeaponsCnt();
+                r.repcnt = 0;
+                r.repflag = 0;
+                for (int u = 0; u < robot->m_UnitCnt; ++u) {
+                    SWeaponRepairData *rep = robot->m_Unit[u].m_WeaponRepairData;
+                    if (rep) {
+                        ++r.repcnt;
+                        if (FLAG(rep->m_Flags, SWeaponRepairData::CAN_BE_DRAWN))
+                            ++r.repflag;
+                    }
+                }
+
+                const unsigned char fill = SimFillByte();
+                if (fill) {
+                    r.garb = ScanFill(robot, sizeof(CMatrixRobotAI), fill, r.gof, 24);
+                    r.gofcnt = r.garb < 24 ? r.garb : 24;
+                }
             }
         }
 
@@ -145,13 +353,27 @@ void DumpObjects(FILE *f, int time) {
 
     qsort(recs, count, sizeof(SObjRec), ObjRecCmp);
 
-    for (int i = 0; i < count; ++i)
+    for (int i = 0; i < count; ++i) {
         fprintf(f,
-                "t=%d type=%d side=%d x=%.3f y=%.3f vx=%.4f vy=%.4f sp=%.4f ang=%.4f st=%d maxsp=%.2f wcorr=%.2f "
-                "scup=%.2f scdown=%.2f rots=%.2f grp=%.2f col=%.2f\n",
-                time, recs[i].type, recs[i].side, recs[i].x, recs[i].y, recs[i].vx, recs[i].vy, recs[i].speed,
-                recs[i].ang, recs[i].state, recs[i].maxsp, recs[i].wcorr, recs[i].scup, recs[i].scdown,
-                recs[i].rotspeed, recs[i].grpsp, recs[i].colsp);
+                "t=%d id=%u type=%d side=%d x=%.4f y=%.4f vx=%.4f vy=%.4f sp=%.4f rsp=%.4f ang=%.4f st=%d "
+                "maxsp=%.2f wcorr=%.2f scup=%.2f scdown=%.2f rots=%.2f grp=%.2f col=%.2f "
+                "fx=%.4f fy=%.4f hfx=%.4f hfy=%.4f "
+                "ord=%d ph=%d p1=%.2f p2=%.2f p3=%.2f p4=%d "
+                "zc=%d zd=%d zpn=%d zpc=%d mpc=%d mpi=%d dx=%d dy=%d mx=%d my=%d ncols=%d "
+                "mdist=%.3f mfollow=%.3f hav=%d wcnt=%d rep=%d repf=%d camsq=%d garb=%d gof=",
+                time, recs[i].id, recs[i].type, recs[i].side, recs[i].x, recs[i].y, recs[i].vx, recs[i].vy,
+                recs[i].speed, recs[i].rotspeed_obj, recs[i].ang, recs[i].state, recs[i].maxsp, recs[i].wcorr,
+                recs[i].scup, recs[i].scdown, recs[i].rotspeed, recs[i].grpsp, recs[i].colsp, recs[i].fx, recs[i].fy,
+                recs[i].hfx, recs[i].hfy, recs[i].order, recs[i].phase, recs[i].p1, recs[i].p2, recs[i].p3, recs[i].p4,
+                recs[i].zc, recs[i].zd, recs[i].zpnext, recs[i].zpcnt, recs[i].mpcnt, recs[i].mpcur, recs[i].dx,
+                recs[i].dy, recs[i].mx, recs[i].my, recs[i].cols, recs[i].mdist, recs[i].mfollow, recs[i].hav,
+                recs[i].wcnt, recs[i].repcnt, recs[i].repflag, recs[i].camsq, recs[i].garb);
+        if (recs[i].gofcnt == 0)
+            fprintf(f, "-");
+        for (int g = 0; g < recs[i].gofcnt; ++g)
+            fprintf(f, "%s%u", g ? "," : "", recs[i].gof[g]);
+        fprintf(f, "\n");
+    }
 }
 
 // Фильтр необработанных исключений: пишет код, адрес и модуль падения,
@@ -186,6 +408,12 @@ LONG WINAPI SimCrashFilter(EXCEPTION_POINTERS *ep) {
 
 }  // namespace
 
+void SimDumpLayouts(FILE *f) {
+    CMatrixMapStatic::SimDumpLayout(f);
+    CMatrixRobot::SimDumpLayout(f);
+    CMatrixRobotAI::SimDumpLayout(f);
+}
+
 bool SimModeEnabled(void) {
     const wchar_t *v = EnvStr(L"MATRIXGAME_SIM");
     return v && v[0] != L'0';
@@ -198,11 +426,38 @@ unsigned SimSeed(unsigned fallback) {
 
 unsigned SimRand(void) {
     ++g_randCalls;
-    return (unsigned)rand();
+    RandRecord(_ReturnAddress());
+
+    if (g_simPhase == SIMPHASE_VISUAL)
+        return (unsigned)rand();
+
+    ++g_logicCalls;
+    // RND/FRND в Math3D.hpp рассчитаны на диапазон 0..RAND_MAX, поэтому логический
+    // поток обязан его соблюдать — иначе игровые формулы уезжают на порядки.
+    return LogicRngNext() & RAND_MAX;
+}
+
+void SimSetPhase(int phase) {
+    g_simPhase = phase;
+}
+
+int SimPhase(void) {
+    return g_simPhase;
+}
+
+unsigned long long SimLogicRandCalls(void) {
+    return g_logicCalls;
 }
 
 unsigned long long SimRandCalls(void) {
     return g_randCalls;
+}
+
+int g_repairStats[3] = {0, 0, 0};
+
+void SimRepairStat(int ev) {
+    if (ev >= 0 && ev < 3)
+        ++g_repairStats[ev];
 }
 
 void SimInstallCrashFilter(void) {
@@ -251,13 +506,27 @@ void SimLogTakt(int step) {
 
     static FILE *log = NULL;
     static FILE *objlog = NULL;
+    static FILE *randlog = NULL;
     static int nextLogAt = 0;
+    static int period = 0;
 
-    if (!log) {
+    // Заливаем стек перед логикой: так дифференциальный прогон ловит чтение
+    // неинициализированных локальных переменных, а не только кучи.
+    {
+        const int poisonBytes = EnvInt(L"MATRIXGAME_POISON");
+        if (poisonBytes > 0) {
+            const wchar_t *fillStr = EnvStr(L"MATRIXGAME_FILL");
+            const unsigned char fill = fillStr ? (unsigned char)(wcstoul(fillStr, NULL, 16) & 0xFF) : 0;
+            PoisonStack(poisonBytes, fill);
+        }
+    }
+
+    if (!period) {
         const wchar_t *path = EnvStr(L"MATRIXGAME_HASHLOG");
         const wchar_t *objpath = EnvStr(L"MATRIXGAME_OBJLOG");
+        const wchar_t *randpath = EnvStr(L"MATRIXGAME_RANDLOG");
 
-        if (!path && !objpath)
+        if (!path && !objpath && !randpath)
             return;
 
         if (path)
@@ -265,8 +534,30 @@ void SimLogTakt(int step) {
         if (objpath)
             objlog = _wfopen(objpath, L"w");
 
-        if (!log && !objlog)
+        // Рядом с obj-логом кладём таблицу смещений полей: по ней смещения из
+        // колонки gof переводятся в имена.
+        if (objpath) {
+            wchar_t layoutPath[MAX_PATH * 2];
+            _snwprintf(layoutPath, MAX_PATH * 2 - 1, L"%ls.layout", objpath);
+            layoutPath[MAX_PATH * 2 - 1] = 0;
+            FILE *lf = _wfopen(layoutPath, L"w");
+            if (lf) {
+                SimDumpLayouts(lf);
+                fclose(lf);
+            }
+        }
+        if (randpath)
+            randlog = _wfopen(randpath, L"w");
+
+        if (!log && !objlog && !randlog)
             return;
+
+        // Период дампа можно уменьшить до одного тика, чтобы поймать точный такт
+        // расхождения. По умолчанию — SIM_HASH_PERIOD.
+        period = EnvInt(L"MATRIXGAME_HASHSTEP");
+        if (period <= 0)
+            period = SIM_HASH_PERIOD;
+
         nextLogAt = 0;
     }
 
@@ -274,19 +565,39 @@ void SimLogTakt(int step) {
     const int maxTicks = EnvInt(L"MATRIXGAME_MAXTICKS");
 
     if (time >= nextLogAt) {
-        nextLogAt = time + SIM_HASH_PERIOD;
+        nextLogAt = time + period;
 
         int objects = 0;
         const unsigned long long hash = HashWorld(&objects);
 
         if (log) {
-            fprintf(log, "t=%d objects=%d rand=%llu hash=%016llx\n", time, objects, SimRandCalls(), hash);
+            fprintf(log, "t=%d objects=%d rand=%llu logic=%llu hash=%016llx rep=%d/%d/%d\n", time, objects,
+                    SimRandCalls(), SimLogicRandCalls(), hash, g_repairStats[SIMREP_ALLOC],
+                    g_repairStats[SIMREP_ENTER], g_repairStats[SIMREP_PASS]);
+            g_repairStats[SIMREP_ALLOC] = g_repairStats[SIMREP_ENTER] = g_repairStats[SIMREP_PASS] = 0;
             fflush(log);
         }
 
         if (objlog) {
             DumpObjects(objlog, time);
             fflush(objlog);
+        }
+
+        if (randlog) {
+            fprintf(randlog, "t=%d total=%llu", time, SimRandCalls());
+            for (int i = 0; i < g_sitesCnt; ++i) {
+                const unsigned long long delta = g_sites[i].count - g_sites[i].reported;
+                if (delta) {
+                    g_sites[i].reported = g_sites[i].count;
+                    fprintf(randlog, " s%llx=%llu", ModuleOffset(g_sites[i].addr), delta);
+                }
+            }
+            if (g_sitesOverflow) {
+                fprintf(randlog, " overflow=%llu", g_sitesOverflow);
+                g_sitesOverflow = 0;
+            }
+            fprintf(randlog, "\n");
+            fflush(randlog);
         }
     }
 
@@ -295,7 +606,8 @@ void SimLogTakt(int step) {
         const unsigned long long hash = HashWorld(&objects);
 
         if (log) {
-            fprintf(log, "FINAL t=%d objects=%d rand=%llu hash=%016llx\n", time, objects, SimRandCalls(), hash);
+            fprintf(log, "FINAL t=%d objects=%d rand=%llu logic=%llu hash=%016llx\n", time, objects, SimRandCalls(),
+                    SimLogicRandCalls(), hash);
             fflush(log);
             fclose(log);
             log = NULL;
@@ -305,6 +617,12 @@ void SimLogTakt(int step) {
             fflush(objlog);
             fclose(objlog);
             objlog = NULL;
+        }
+
+        if (randlog) {
+            fflush(randlog);
+            fclose(randlog);
+            randlog = NULL;
         }
 
         SETFLAG(g_Flags, GFLAG_EXITLOOP);

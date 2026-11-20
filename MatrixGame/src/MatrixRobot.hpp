@@ -235,6 +235,13 @@ public:
 class CMatrixRobotAI : public CMatrixRobot {
     CTextureManaged *m_BigTexture;
     CTextureManaged *m_MedTexture;
+
+public:
+#ifdef MATRIXGAME_SIM_HARNESS
+    static void SimDumpLayout(FILE *f);
+#endif
+
+private:
 #ifdef USE_SMALL_TEXTURE_IN_ROBOT_ICON
     CTextureManaged *m_SmallTexture;  // hm, may be its no needed //may be, who cares :)
 #endif
@@ -345,6 +352,17 @@ public:
     float GetSpeedWaterCorr() { return m_SpeedWaterCorr; }
     float GetSpeedSlopeCorrUp() { return m_SpeedSlopeCorrUp; }
     float GetSpeedSlopeCorrDown() { return m_SpeedSlopeCorrDown; }
+    int GetZoneCur() const { return m_ZoneCur; }
+    int GetZoneDes() const { return m_ZoneDes; }
+    int GetZonePathNext() const { return m_ZonePathNext; }
+    int GetZonePathCnt() const { return m_ZonePathCnt; }
+    int GetMovePathCur() const { return m_MovePathCur; }
+    int GetMovePathCnt() const { return m_MovePathCnt; }
+    int GetDesX() const { return m_DesX; }
+    int GetDesY() const { return m_DesY; }
+    float GetMovePathDist() const { return m_MovePathDist; }
+    float GetMovePathDistFollow() const { return m_MovePathDistFollow; }
+    int GetWeaponsCnt() const { return m_WeaponsCnt; }
 #endif
     int GetOrdersInPool() { return m_OrdersInPool; }
     SOrder *GetOrder(int no) { return m_OrdersList + no; }

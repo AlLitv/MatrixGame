@@ -5,6 +5,7 @@
 
 #include "stdafx.h"
 
+#include "SimHarness.hpp"
 #include "MatrixFormGame.hpp"
 #include "MatrixMap.hpp"
 #include "MatrixRobot.hpp"
@@ -132,6 +133,11 @@ void CFormMatrixGame::Draw(void) {
 
     g_MatrixMap->BeforeDraw();
 
+    // Всё, что ниже, — фаза отрисовки: rand() здесь берётся из отдельного потока,
+    // чтобы кадровые эффекты не сдвигали последовательность логики.
+#ifdef MATRIXGAME_SIM_HARNESS
+    SimSetPhase(SIMPHASE_VISUAL);
+#endif
     // ASSERT_DX(g_D3DD->Clear( 0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL,
     // D3DCOLOR_XRGB(255,0,0), 1.0f, 0 ));
 
@@ -205,6 +211,10 @@ void CFormMatrixGame::Draw(void) {
     CDText::Get(buff);
 
     SetWindowTextA(g_Wnd, buff);
+#endif
+
+#ifdef MATRIXGAME_SIM_HARNESS
+    SimSetPhase(SIMPHASE_LOGIC);
 #endif
 }
 
