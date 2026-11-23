@@ -677,6 +677,27 @@ void CMatrixMapStatic::CalcDistances(void) {
 void CMatrixMapStatic::SortEndGraphicTakt(int step) {
     DTRACE();
 
+#ifdef MATRIXGAME_SIM_HARNESS
+    // objects[] — это отфильтрованный по камере список того, что попало в кадр,
+    // и его состав меняется от кадра к кадру. Графический такт меняет состояние
+    // симуляции (наклон корпуса, от которого зависит скорость, пыль, эффекты),
+    // поэтому в харнессе гоняем его по списку логики: ровно раз в такт и для
+    // всех объектов, независимо от того, что видно.
+    for (CMatrixMapStatic *ms = GetFirstLogic(); ms; ms = ms->GetNextLogic()) {
+        ms->m_CamDistSq = D3DXVec3LengthSq(&(g_MatrixMap->m_Camera.GetFrustumCenter() - ms->m_Core->m_GeoCenter));
+        ms->Takt(step);
+        // Матрицу корпуса игра обновляет в BeforeDraw, то есть раз в кадр.
+        // Логика читает из неё уклон местности (Seek) и высоту, поэтому в
+        // харнессе пересобираем её в конце такта: флаг ставим сами, иначе его
+        // успевает снять BeforeDraw.
+        if (ms->IsRobot()) {
+            ms->RChange(MR_Matrix);
+            ms->AsRobot()->RNeed(MR_Matrix);
+        }
+    }
+    return;
+#endif
+
     for (int i = objects_left; i < objects_rite; ++i) {
         // calc m_CamDistSq
         objects[i]->m_CamDistSq =
