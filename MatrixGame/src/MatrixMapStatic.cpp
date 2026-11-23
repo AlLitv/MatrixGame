@@ -662,6 +662,15 @@ void CMatrixMapStatic::SortBegin(void) {
 void CMatrixMapStatic::SortEndRecalcTerainColor(void) {
     DTRACE();
 
+#ifdef MATRIXGAME_SIM_HARNESS
+    // Пересчёт цвета почвы — чисто визуальный (идёт в D3DRS_TEXTUREFACTOR), но
+    // он дёргает CalcBounds, а та кеширует габариты и время их пересчёта на
+    // 100 мс. Из-за этого кадры сдвигали момент, в который JoinToGroup брал
+    // габариты, а вместе с ними и m_GeoCenter — а он уже участвует в логике
+    // (поиск объектов, урон). В харнессе оставляем кеш логике.
+    return;
+#endif
+
     for (int i = objects_left; i < objects_rite; ++i) {
         objects[i]->RecalcTerainColor();
     }
@@ -686,14 +695,17 @@ void CMatrixMapStatic::SortEndGraphicTakt(int step) {
     for (CMatrixMapStatic *ms = GetFirstLogic(); ms; ms = ms->GetNextLogic()) {
         ms->m_CamDistSq = D3DXVec3LengthSq(&(g_MatrixMap->m_Camera.GetFrustumCenter() - ms->m_Core->m_GeoCenter));
         ms->Takt(step);
-        // Матрицу корпуса игра обновляет в BeforeDraw, то есть раз в кадр.
-        // Логика читает из неё уклон местности (Seek) и высоту, поэтому в
-        // харнессе пересобираем её в конце такта: флаг ставим сами, иначе его
-        // успевает снять BeforeDraw.
-        if (ms->IsRobot()) {
-            ms->RChange(MR_Matrix);
-            ms->AsRobot()->RNeed(MR_Matrix);
-        }
+        // Ресурсы объектов выгружает SRemindCore::Takt, а «продлевает» их
+        // BeforeDraw, то есть обе операции привязаны к кадрам. В харнессе
+        // продлеваем на каждом такте: выгрузка и повторная загрузка графики
+        // сбрасывает анимацию, а её состояние читает и логика.
+        ms->m_RemindCore.Use(FREE_TIME_PERIOD);
+        // Матрицу объекта игра обновляет в BeforeDraw, то есть раз в кадр.
+        // Логика читает её в ответ: робот — уклон местности (Seek) и высоту,
+        // столкновения — габариты построек. Поэтому в харнессе пересобираем её
+        // в конце такта: флаг ставим сами, иначе его успевает снять BeforeDraw.
+        ms->RChange(MR_Matrix);
+        ms->RNeed(MR_Matrix);
     }
     return;
 #endif
