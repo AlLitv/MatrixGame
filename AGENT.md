@@ -126,15 +126,18 @@ The repository carries a local **CodeGraph** index (`.codegraph/`, ignores itsel
 
 ## 8. Determinism (netplay groundwork)
 
-Three root causes of desync have been found so far; two of them are fixed structurally:
+Three root causes of desync have been found so far, all of them fixed structurally:
 
 1. **Pointer comparisons used as tie-breakers.** `CollisionCallback` (`MatrixRobot.cpp`) decided which of two head-on robots yields via `DWORD(pCurrBot) < DWORD(data->robot)`. Heap addresses differ between runs, so the winner differed and the battle desynced after a few seconds. Map objects now carry a stable creation-order id (`CMatrixMapStatic::m_Id` / `GetId()`), and both comparisons use it.
 2. **The logic AI and the renderer shared one RNG stream.** `RND`/`FRND`/`IRND` expand to `rand()`, and visual effects call them from `Draw`. Every extra draw (a visible repair beam, a dust puff, a debris look) shifts the sequence the AI consumes, so what is on screen desyncs what happens in the world. The harness now keeps two streams: logic takes numbers from its own xorshift (seeded from `MATRIXGAME_SEED`), the whole `CFormMatrixGame::Draw` phase takes them from `rand()`. This moved the first cross-fill divergence from 6100 ms to 9630 ms of game time and, more importantly, made visual noise unable to affect the simulation at all.
 3. **Reading uninitialised memory.** A field read before being written returns heap garbage, which differs between processes. `CHeap::Alloc` zeroes its memory under the harness, which makes this class deterministic; the field-by-field cleanup is in progress.
+4. **The graphic takt ran only for what was on screen.** `CMatrixMapStatic::SortEndGraphicTakt` walks `objects[]`, which is the per-frame list filtered by the camera frustum, so an object advanced only in the frames where it was visible — at 60 fps some ticks got two passes, some none. The graphic takt is not purely visual: it smooths the body up vector, and `RNeed(MR_Matrix)` rebuilds the forward axis from it, which `Seek` reads as the terrain slope for the speed correction (`k = LERP(-slope, 1.0, m_SpeedSlopeCorrDown)`). Robot `id=1262` was parked on a slope, so its speed drifted apart while every other field still matched. `CMatrixRobot::BeforeDraw` (a frame-time call) was also the only place that rebuilt that matrix, so the rebuild cadence followed the frame rate too.
 
 Fields that were provably read before being written and are now initialised: `CMatrixRobotAI` — `m_MovePathDist`, `m_MovePathDistFollow`, `m_MovePath[]`, `m_MoveTestPos`, `m_MoveTestChange`, `m_ZoneNear`, `m_NextTimeAblaze`, `m_NextTimeShorted`; `CMatrixRobot` — `m_BotRotAngle` (dead field, but it was full of garbage), `m_TimeWithBase`, `m_MaxHitPointInversed`. `SWeaponRepairData::m_Flags` still only has one bit cleared on allocation.
 
-What is left: at ~9630 ms the world diverges in `m_Speed` of one robot while **every** dumped field still matches and the logic RNG counters are identical, i.e. the differing input is not part of the robot object and not RNG. The differential harness is the tool to chase it (see below).
+With all four fixed, two runs of the same battle with `MATRIXGAME_FILL=CD` and `MATRIXGAME_FILL=AA` now produce an identical world hash at every checkpoint. Cause 4 is currently fixed under `MATRIXGAME_SIM_HARNESS` only: the harness takts every object from the logic list, once per tick, and rebuilds the core matrix at the end of the tick. The production fix is the same idea — move the simulation half of the graphic takt out of the per-frame `objects[]` loop — and belongs to the netplay work itself.
+
+Note that the camera still moves differently between runs (`m_CamDistSq` differs from the first checkpoint, because the frustum center is only refreshed in `BeforeDraw`), and the visual `rand()` stream differs too. Neither reaches the simulation any more; if a future change adds a camera or frame-rate dependency to logic, `camsq` in the object dump is the first thing to look at.
 
 The harness lives in `MatrixGame/src/SimHarness.{hpp,cpp}` and is inert unless `MATRIXGAME_SIM_HARNESS` is defined. Build it with:
 
@@ -162,18 +165,24 @@ Environment switches:
 | `MATRIXGAME_RANDLOG` | `rand()` calls per return address, as a per-period delta |
 | `MATRIXGAME_FILL` | byte used to fill fresh allocations (hex), default `00` |
 | `MATRIXGAME_POISON` | bytes of stack to poison with the same byte, 0 = off |
+| `MATRIXGAME_NODRAW` | skip rendering entirely: the same battle runs an order of magnitude faster, which is what long determinism runs need |
 | `MATRIXGAME_TRACE` | init stages and the crash address |
+| `MATRIXGAME_TRACEBOT` | trace one object by id: Seek inputs, normal smoothing, matrix rebuilds |
+| `MATRIXGAME_TRACEFROM` / `MATRIXGAME_TRACETO` | game-time window for that trace, ms |
+| `MATRIXGAME_TRACEBOTLOG` | where the trace goes, default `tracebot.log` |
 
 The differential technique: run the same battle twice with `MATRIXGAME_FILL=CD` and `MATRIXGAME_FILL=AA`. Anything the engine reads before writing it will differ between the two runs, so the first field that diverges is the uninitialised one. `tools/` has the whole loop:
 
 | File | What it does |
 | --- | --- |
-| `tools/Run-Sim.ps1` | runs one pass with the right variables and waits for exit |
+| `tools/Run-Sim.ps1` | runs one pass with the right variables, clicks through the menu to start the battle and waits for exit |
 | `tools/simdiff.py` | compares two hash logs or two object dumps, reports the first diverging field |
 | `tools/randlog_sites.py` | compares RNG call-site histograms and names the function via `MatrixGame.map` |
 | `tools/gen_layout.py` | regenerates `SimLayout*.inc`, the field-offset tables the fill scanner uses |
 
 `MATRIXGAME_OBJLOG` also reports, per robot, `garb=` (how many dwords still hold the fill byte) and `gof=` (their offsets, resolvable through the `.layout` file written next to the log). That is how the list of uninitialised fields above was produced.
+
+A run is started by `tools/Run-Sim.ps1`, which puts the harness DLL into the installed game and drives the menu: the planetary battle module only starts when the player picks it there, so a bare `Start-Process Rangers.exe` sits in the main menu and writes nothing. `-AutoStart` (the default) clicks the bottom-left «ПЛАНЕТАРНЫЕ БОИ» icon and then «СТАРТ»; the coordinates are fractions of a 2560x1440 screen, so on another resolution recalibrate them or pass `-AutoStart:$false` and drive the menu by hand. Wall-clock cost is roughly 30-60 s per second of game time, so a 30 s battle takes about half an hour of real time per pass.
 
 ## 9. Pre-commit checklist
 

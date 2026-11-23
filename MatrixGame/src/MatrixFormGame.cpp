@@ -85,6 +85,14 @@ void CFormMatrixGame::Leave(void) {
 void CFormMatrixGame::Draw(void) {
     DTRACE();
 
+#ifdef MATRIXGAME_SIM_HARNESS
+    // Без отрисовки прогон идёт на порядок быстрее (кадров больше, чем тактов,
+    // и ни один из них не нужен, раз логика больше не зависит от кадров).
+    // Нужно для длинных проверок детерминизма.
+    if (SimNoDraw())
+        return;
+#endif
+
     if (!FLAG(g_MatrixMap->m_Flags, MMFLAG_VIDEO_RESOURCES_READY))
         return;
 
