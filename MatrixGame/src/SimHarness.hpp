@@ -74,4 +74,12 @@ unsigned long long SimLogicRandCalls(void);
 // Нужна, чтобы переводить смещения, найденные сканером заливки, в имена полей.
 void SimDumpLayouts(FILE *f);
 
+// Трассировка одного объекта: MATRIXGAME_TRACEBOT=<id> включает её,
+// MATRIXGAME_TRACEFROM/TRACETO (мс игрового времени) сужают окно,
+// MATRIXGAME_TRACEBOTLOG задаёт файл (по умолчанию tracebot.log).
+// Нужна, чтобы видеть, кто и с какими аргументами меняет поля робота, когда
+// обычный дамп уже не показывает разницы.
+bool SimTraceBotOn(unsigned id);
+void SimTraceBotf(unsigned id, const char *fmt, ...);
+
 #endif

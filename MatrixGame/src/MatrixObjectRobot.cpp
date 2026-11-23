@@ -292,6 +292,10 @@ float CMatrixRobot::Z_From_Pos(void) {
 void CMatrixRobot::RNeed(dword need) {
     DTRACE();
 
+#ifdef MATRIXGAME_SIM_HARNESS
+    if (SimTraceBotOn(GetId()))
+        SimTraceBotf(GetId(), "rneed in need=%x chg=%x", (unsigned)need, (unsigned)m_RChange);
+#endif
     if (m_CurrState == ROBOT_DIP || IsMustDie())
         return;
 
@@ -465,6 +469,12 @@ void CMatrixRobot::RNeed(dword need) {
             m_Core->m_Matrix._42 = m_PosY;
             m_Core->m_Matrix._43 = roboz;
             m_Core->m_Matrix._44 = 1;
+#ifdef MATRIXGAME_SIM_HARNESS
+            if (SimTraceBotOn(GetId()))
+                SimTraceBotf(GetId(), "need st=%d roboz=%.9g up=%.9g,%.9g,%.9g fwd=%.9g,%.9g,%.9g",
+                             (int)m_CurrState, roboz, up.x, up.y, up.z, tmp_forward.x, tmp_forward.y,
+                             tmp_forward.z);
+#endif
         }
     skip_matrix:
 
@@ -871,6 +881,10 @@ void SMatrixRobotUnit::PrepareForDIP(void) {
 
 void CMatrixRobot::ApplyNaklon(const D3DXVECTOR3 &dir) {
     *(D3DXVECTOR3 *)&m_Core->m_Matrix._31;  // = LERPVECTOR(mul, *(D3DXVECTOR3*)&m_Core->m_Matrix._31, up);
+#ifdef MATRIXGAME_SIM_HARNESS
+    if (SimTraceBotOn(GetId()))
+        SimTraceBotf(GetId(), "naklon dir=%.9g,%.9g,%.9g", dir.x, dir.y, dir.z);
+#endif
     D3DXVec3Normalize((D3DXVECTOR3 *)&m_Core->m_Matrix._31, &(*(D3DXVECTOR3 *)&m_Core->m_Matrix._31 + dir));
 }
 

@@ -32,6 +32,9 @@ param(
     [int]$HashStep = 0,
     [switch]$RandLog,
     [int]$Poison = 0,
+    [int]$TraceBot = 0,
+    [int]$TraceFrom = 0,
+    [int]$TraceTo = 0,
     [int]$TimeoutSec = 900
 )
 
@@ -63,6 +66,15 @@ else {
 }
 if ($Fill) { $env:MATRIXGAME_FILL = $Fill } else { Remove-Item Env:\MATRIXGAME_FILL -ErrorAction SilentlyContinue }
 if ($Poison -gt 0) { $env:MATRIXGAME_POISON = "$Poison" } else { Remove-Item Env:\MATRIXGAME_POISON -ErrorAction SilentlyContinue }
+if ($TraceBot -gt 0) {
+    $env:MATRIXGAME_TRACEBOT = "$TraceBot"
+    $env:MATRIXGAME_TRACEFROM = "$TraceFrom"
+    $env:MATRIXGAME_TRACETO = "$TraceTo"
+    $env:MATRIXGAME_TRACEBOTLOG = Join-Path $logs "$Name-bot.txt"
+}
+else {
+    Remove-Item Env:\MATRIXGAME_TRACEBOT, Env:\MATRIXGAME_TRACEFROM, Env:\MATRIXGAME_TRACETO, Env:\MATRIXGAME_TRACEBOTLOG -ErrorAction SilentlyContinue
+}
 
 "run      : $Name"
 "map/seed : $Map / $Seed, step $Step ms, max $Ticks ms, hash step $(if ($HashStep -gt 0) { $HashStep } else { 100 }) ms"

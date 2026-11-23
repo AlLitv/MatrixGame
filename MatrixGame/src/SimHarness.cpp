@@ -14,6 +14,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <intrin.h>
 
 // stdafx.h подменяет rand() на SimRand(), а сама обёртка должна звать настоящий.
@@ -213,6 +214,13 @@ struct SObjRec {
     float rotspeed;
     float grpsp;
     float colsp;
+    // Ориентация корпуса. mz — z-компонента «вперёд» корпуса, из неё Seek
+    // считает уклон местности и поправку скорости; up — сглаженная нормаль.
+    float ux;
+    float uy;
+    float uz;
+    float mz;
+    float cz;
     // Ориентация корпуса и башни.
     float fx;
     float fy;
@@ -299,6 +307,15 @@ void DumpObjects(FILE *f, int time) {
                 r.rotspeed = robot->GetMaxRotationSpeed();
                 r.grpsp = robot->m_GroupSpeed;
                 r.colsp = robot->m_ColSpeed;
+                {
+                    const D3DXVECTOR3 coreUp = robot->GetCoreUp();
+                    const D3DXVECTOR3 coreFwd = robot->GetCoreForward();
+                    r.ux = coreUp.x;
+                    r.uy = coreUp.y;
+                    r.uz = coreUp.z;
+                    r.mz = coreFwd.z;
+                    r.cz = robot->GetCoreZ();
+                }
                 r.fx = robot->m_Forward.x;
                 r.fy = robot->m_Forward.y;
                 r.hfx = robot->m_HullForward.x;
@@ -354,16 +371,22 @@ void DumpObjects(FILE *f, int time) {
     qsort(recs, count, sizeof(SObjRec), ObjRecCmp);
 
     for (int i = 0; i < count; ++i) {
+        // Все float-поля печатаются с девятью значащими цифрами: float хранит
+        // около семи, поэтому так значение видно бит в бит. Меньшая точность
+        // прячет расхождение в сотых, из-за чего первым «разошедшимся» полем
+        // оказывается не причина, а её следствие.
         fprintf(f,
-                "t=%d id=%u type=%d side=%d x=%.4f y=%.4f vx=%.4f vy=%.4f sp=%.4f rsp=%.4f ang=%.4f st=%d "
-                "maxsp=%.2f wcorr=%.2f scup=%.2f scdown=%.2f rots=%.2f grp=%.2f col=%.2f "
-                "fx=%.4f fy=%.4f hfx=%.4f hfy=%.4f "
-                "ord=%d ph=%d p1=%.2f p2=%.2f p3=%.2f p4=%d "
+                "t=%d id=%u type=%d side=%d x=%.9g y=%.9g vx=%.9g vy=%.9g sp=%.9g rsp=%.9g ang=%.9g st=%d "
+                "maxsp=%.9g wcorr=%.9g scup=%.9g scdown=%.9g rots=%.9g grp=%.9g col=%.9g "
+                "ux=%.9g uy=%.9g uz=%.9g mz=%.9g cz=%.9g "
+                "fx=%.9g fy=%.9g hfx=%.9g hfy=%.9g "
+                "ord=%d ph=%d p1=%.9g p2=%.9g p3=%.9g p4=%d "
                 "zc=%d zd=%d zpn=%d zpc=%d mpc=%d mpi=%d dx=%d dy=%d mx=%d my=%d ncols=%d "
                 "mdist=%.3f mfollow=%.3f hav=%d wcnt=%d rep=%d repf=%d camsq=%d garb=%d gof=",
                 time, recs[i].id, recs[i].type, recs[i].side, recs[i].x, recs[i].y, recs[i].vx, recs[i].vy,
                 recs[i].speed, recs[i].rotspeed_obj, recs[i].ang, recs[i].state, recs[i].maxsp, recs[i].wcorr,
-                recs[i].scup, recs[i].scdown, recs[i].rotspeed, recs[i].grpsp, recs[i].colsp, recs[i].fx, recs[i].fy,
+                recs[i].scup, recs[i].scdown, recs[i].rotspeed, recs[i].grpsp, recs[i].colsp, recs[i].ux, recs[i].uy,
+                recs[i].uz, recs[i].mz, recs[i].cz, recs[i].fx, recs[i].fy,
                 recs[i].hfx, recs[i].hfy, recs[i].order, recs[i].phase, recs[i].p1, recs[i].p2, recs[i].p3, recs[i].p4,
                 recs[i].zc, recs[i].zd, recs[i].zpnext, recs[i].zpcnt, recs[i].mpcnt, recs[i].mpcur, recs[i].dx,
                 recs[i].dy, recs[i].mx, recs[i].my, recs[i].cols, recs[i].mdist, recs[i].mfollow, recs[i].hav,
@@ -499,6 +522,62 @@ const wchar *SimMapOverride(void) {
     wcsncpy(buf, v, 127);
     buf[127] = 0;
     return buf;
+}
+
+namespace {
+
+struct SBotTrace {
+    bool inited;
+    unsigned id;
+    int from;
+    int to;
+    FILE *file;
+};
+
+SBotTrace g_botTrace = {false, 0, 0, 0, NULL};
+
+void BotTraceInit(void) {
+    g_botTrace.inited = true;
+    g_botTrace.id = (unsigned)EnvInt(L"MATRIXGAME_TRACEBOT");
+    g_botTrace.from = EnvInt(L"MATRIXGAME_TRACEFROM");
+    g_botTrace.to = EnvInt(L"MATRIXGAME_TRACETO");
+
+    if (g_botTrace.id == 0)
+        return;
+
+    const wchar_t *path = EnvStr(L"MATRIXGAME_TRACEBOTLOG");
+    g_botTrace.file = _wfopen(path ? path : L"tracebot.log", L"w");
+}
+
+}  // namespace
+
+bool SimTraceBotOn(unsigned id) {
+    if (!g_botTrace.inited)
+        BotTraceInit();
+    if (!g_botTrace.id || !g_botTrace.file || id != g_botTrace.id)
+        return false;
+
+    const int time = g_MatrixMap->GetTime();
+    if (time < g_botTrace.from)
+        return false;
+    if (g_botTrace.to > 0 && time > g_botTrace.to)
+        return false;
+    return true;
+}
+
+void SimTraceBotf(unsigned id, const char *fmt, ...) {
+    if (!SimTraceBotOn(id))
+        return;
+
+    fprintf(g_botTrace.file, "t=%d ", g_MatrixMap->GetTime());
+
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(g_botTrace.file, fmt, ap);
+    va_end(ap);
+
+    fprintf(g_botTrace.file, "\n");
+    fflush(g_botTrace.file);
 }
 
 void SimLogTakt(int step) {

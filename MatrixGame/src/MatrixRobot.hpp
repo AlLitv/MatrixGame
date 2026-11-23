@@ -363,6 +363,10 @@ public:
     float GetMovePathDist() const { return m_MovePathDist; }
     float GetMovePathDistFollow() const { return m_MovePathDistFollow; }
     int GetWeaponsCnt() const { return m_WeaponsCnt; }
+    // Ориентация корпуса: Seek считает по ней уклон, от уклона зависит скорость.
+    D3DXVECTOR3 GetCoreUp() const { return D3DXVECTOR3(m_Core->m_Matrix._31, m_Core->m_Matrix._32, m_Core->m_Matrix._33); }
+    D3DXVECTOR3 GetCoreForward() const { return D3DXVECTOR3(m_Core->m_Matrix._21, m_Core->m_Matrix._22, m_Core->m_Matrix._23); }
+    float GetCoreZ() const { return m_Core->m_Matrix._43; }
 #endif
     int GetOrdersInPool() { return m_OrdersInPool; }
     SOrder *GetOrder(int no) { return m_OrdersList + no; }

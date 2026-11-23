@@ -704,6 +704,13 @@ void CMatrixRobotAI::LogicTakt(int ms) {
         float mul = (float)(1.0 - pow(0.996, double(ms)));
         D3DXVECTOR3 up;
         g_MatrixMap->GetNormal(&up, m_PosX, m_PosY, true);
+#ifdef MATRIXGAME_SIM_HARNESS
+        if (SimTraceBotOn(GetId())) {
+            D3DXVECTOR3 old = *(D3DXVECTOR3 *)&m_Core->m_Matrix._31;
+            SimTraceBotf(GetId(), "lerp ms=%d mul=%.9g old=%.9g,%.9g,%.9g tgt=%.9g,%.9g,%.9g", ms, mul, old.x, old.y,
+                         old.z, up.x, up.y, up.z);
+        }
+#endif
         *(D3DXVECTOR3 *)&m_Core->m_Matrix._31 = LERPVECTOR(mul, *(D3DXVECTOR3 *)&m_Core->m_Matrix._31, up);
     }
     DCP();
