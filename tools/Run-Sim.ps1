@@ -115,7 +115,11 @@ public class SimClick {
     $hwnd = [IntPtr]::Zero
     while ((Get-Date) -lt $deadline) {
         $proc.Refresh()
-        if ($proc.HasExited) { break }
+        if ($proc.HasExited) {
+            # The usual reason is Steam: without a signed-in account that owns
+            # the game, Rangers.exe exits at once with code 0 and writes nothing.
+            throw "Game exited immediately (code $($proc.ExitCode)). Is Steam signed in with the account that owns the game?"
+        }
         $h = $proc.MainWindowHandle
         if ($h -ne $null -and $h -ne [IntPtr]::Zero) { $hwnd = $h; break }
         Start-Sleep -Milliseconds 300
