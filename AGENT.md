@@ -138,11 +138,13 @@ Six root causes of desync have been found; the first six subsections below are f
 
 Fields that were provably read before being written and are now initialised: `CMatrixRobotAI` — `m_MovePathDist`, `m_MovePathDistFollow`, `m_MovePath[]`, `m_MoveTestPos`, `m_MoveTestChange`, `m_ZoneNear`, `m_NextTimeAblaze`, `m_NextTimeShorted`; `CMatrixRobot` — `m_BotRotAngle` (dead field, but it was full of garbage), `m_TimeWithBase`, `m_MaxHitPointInversed`. `SWeaponRepairData::m_Flags` still only has one bit cleared on allocation.
 
-Current state: two runs of the same battle with `MATRIXGAME_FILL=CD` and `MATRIXGAME_FILL=AA` produce an identical world hash at every checkpoint from `t=0` to the end of the battle (`t=34900`), as long as rendering is off (`MATRIXGAME_NODRAW=1`). A drawn pass and a no-draw pass of the same battle hash identically too, which is the evidence that rendering no longer reaches the simulation. Causes 4-6 are fixed under `MATRIXGAME_SIM_HARNESS` only: the harness takts every object from the logic list once per tick, rebuilds the core matrix at the end of the tick and skips the visual terrain-colour pass. The production fixes are the same ideas and belong to the netplay work.
+Current state: two runs of the same battle with `MATRIXGAME_FILL=CD` and `MATRIXGAME_FILL=AA` produce an identical world hash at every checkpoint from `t=0` to the end of the battle (`t=34900`), as long as rendering is off (`MATRIXGAME_NODRAW=1`). A drawn pass and a no-draw pass of the same battle hash identically too, which is the evidence that rendering no longer reaches the simulation.
+
+Causes 4-6 live behind `MATRIXGAME_LOCKSTEP`, a CMake option that is on in every harness build and can be switched on in a plain build (`-DMATRIXGAME_LOCKSTEP=ON`, no instrumentation). In that mode: `SortEndGraphicTakt` walks the logic list instead of the camera-filtered `objects[]`, every object's core matrix is rebuilt at the end of the tick, object resources are extended per tick, and `SRemindCore::Takt` is driven by the logic step instead of frame time. Single player leaves the option off, because keeping every object's graphics resident costs memory; a network build needs it on. The terrain-colour pass was fixed unconditionally: it now takes the centre from the object core instead of calling `CalcBounds`, so frames can no longer shift the 100 ms bounds cache that `JoinToGroup` fills `m_GeoCenter` from.
 
 Note that the camera still moves differently between runs (`m_CamDistSq` differs from the first checkpoint, because the frustum center is only refreshed in `BeforeDraw`), and the visual `rand()` stream differs too. Neither reaches the simulation any more; if a future change adds a camera or frame-rate dependency to logic, `camsq` in the object dump is the first thing to look at.
 
-One practical trap: the game needs Steam signed in. Without it `Rangers.exe` starts, exits immediately with code 0 and writes nothing at all.
+One practical trap: the game needs the right Steam account signed in. Without it `Rangers.exe` starts, exits immediately with code 0 and writes nothing at all.
 
 The harness lives in `MatrixGame/src/SimHarness.{hpp,cpp}` and is inert unless `MATRIXGAME_SIM_HARNESS` is defined. Build it with:
 
@@ -153,7 +155,7 @@ cmake -S . -B build-sim -A Win32 -DMATRIXGAME_SIM_HARNESS=ON ^
 cmake --build build-sim --config Release
 ```
 
-The option is a normal CMake switch now (it defines `MATRIXGAME_SIM_HARNESS` for every target, because the allocator in `MatrixLib` needs it too) and it also enables `/MAP`, so RNG call sites reported as module offsets can be resolved to function names.
+A plain deterministic build (same lockstep behaviour, no instrumentation) is the same command with `-DMATRIXGAME_LOCKSTEP=ON` and a different build directory; the harness option implies the lockstep one. The harness option also enables `/MAP`, so RNG call sites reported as module offsets can be resolved to function names.
 
 Environment switches:
 
@@ -171,6 +173,7 @@ Environment switches:
 | `MATRIXGAME_FILL` | byte used to fill fresh allocations (hex), default `00` |
 | `MATRIXGAME_POISON` | bytes of stack to poison with the same byte, 0 = off |
 | `MATRIXGAME_NODRAW` | skip rendering entirely: the same battle runs an order of magnitude faster, which is what long determinism runs need |
+| `MATRIXGAME_NOZERO` | stop zeroing fresh allocations (`CHeap::Alloc`): the way to check that the engine no longer reads uninitialised memory |
 | `MATRIXGAME_TRACE` | init stages and the crash address |
 | `MATRIXGAME_TRACEBOT` | trace one object by id: Seek inputs, normal smoothing, matrix rebuilds |
 | `MATRIXGAME_TRACEFROM` / `MATRIXGAME_TRACETO` | game-time window for that trace, ms |
