@@ -13,10 +13,23 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 option(MATRIXGAME_BUILD_DLL "Build dll instead of exe" TRUE)
 option(MATRIXGAME_CHEATS "Enable cheats" TRUE)
 option(MATRIXGAME_SIM_HARNESS "Build the deterministic simulation harness (src/SimHarness.hpp)" FALSE)
+# Lockstep mode: the world advances only on logic ticks, never on frames. That is
+# what a network game needs (see docs/NETPLAY_PLAN.md); single player does not,
+# because keeping every object's graphics resident costs memory.
+option(MATRIXGAME_LOCKSTEP "Deterministic lockstep simulation: state changes only on logic ticks" FALSE)
 
 if(MATRIXGAME_SIM_HARNESS)
-    # Harness code is spread across MatrixGame and MatrixLib (deterministic allocator),
-    # so the define has to be visible to every target in the tree.
+    # The harness measures this mode, so it always implies it.
+    set(MATRIXGAME_LOCKSTEP ON)
+endif()
+
+if(MATRIXGAME_LOCKSTEP)
+    # Spread across MatrixGame and MatrixLib (deterministic allocator), so the
+    # define has to be visible to every target in the tree.
+    add_compile_definitions(MATRIXGAME_LOCKSTEP)
+endif()
+
+if(MATRIXGAME_SIM_HARNESS)
     add_compile_definitions(MATRIXGAME_SIM_HARNESS)
 endif()
 

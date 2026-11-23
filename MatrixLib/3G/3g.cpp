@@ -448,7 +448,12 @@ int L3GRun() {
                 }
 #endif
 
+#ifndef MATRIXGAME_LOCKSTEP
+                // In lockstep mode the reminder (which unloads object resources)
+                // is driven from the logic tick instead: its cadence must not
+                // depend on how many frames were drawn.
                 SRemindCore::Takt(tt);
+#endif
                 g_FormCur->Takt(tt);
 #ifdef _DEBUG
 

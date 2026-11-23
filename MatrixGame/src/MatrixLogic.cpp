@@ -2762,6 +2762,11 @@ void CMatrixMapLogic::Takt(int step) {
 #ifdef MATRIXGAME_SIM_HARNESS
     SimLogTakt(step);
 #endif
+#ifdef MATRIXGAME_LOCKSTEP
+    // Resource unloading is part of what the world sees (a reloaded graph resets
+    // its animation), so its clock must be the simulation one, not the frame one.
+    SRemindCore::Takt(step);
+#endif
 
     if (g_RangersInterface) {
         g_RangersInterface->m_Takt();

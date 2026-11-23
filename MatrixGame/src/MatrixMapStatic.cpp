@@ -1,4 +1,4 @@
-// MatrixGame - SR2 Planetary battles engine
+﻿// MatrixGame - SR2 Planetary battles engine
 // Copyright (C) 2012, Elemental Games, Katauri Interactive, CHK-Games
 // Licensed under GPLv2 or any later version
 // Refer to the LICENSE file included
@@ -130,14 +130,16 @@ void CMatrixMapStatic::StaticTakt(int ms) {
 void CMatrixMapStatic::RecalcTerainColor(void) {
     DTRACE();
 
-    D3DXVECTOR3 vmin, vmax;
-
-    if (this->CalcBounds(vmin, vmax))
-        return;
-
+    // Цвет почвы (уходит в D3DRS_TEXTUREFACTOR) считается по центру объекта, и
+    // брать его надо из ядра: CalcBounds здесь нельзя, она кеширует габариты на
+    // 100 мс, и вызов из кадрового кода сдвигал момент, когда JoinToGroup их
+    // пересчитывала. Вместе с габаритами менялся m_GeoCenter, а его читает и
+    // логика (поиск объектов, урон) — то есть картинка влияла на бой.
     if (GetObjectType() == OBJECT_TYPE_MAPOBJECT && (((CMatrixMapObject *)this)->m_BurnTimeTotal > 0))
         return;
-    DWORD tc = g_MatrixMap->GetColor((vmin.x + vmax.x) * 0.5f, (vmin.y + vmax.y) * 0.5f);
+
+    const D3DXVECTOR3 &center = m_Core->m_GeoCenter;
+    DWORD tc = g_MatrixMap->GetColor(center.x, center.y);
     m_Core->m_TerainColor = LIC(tc, g_MatrixMap->m_Terrain2ObjectTargetColor, g_MatrixMap->m_Terrain2ObjectInfluence);
 }
 
@@ -662,15 +664,6 @@ void CMatrixMapStatic::SortBegin(void) {
 void CMatrixMapStatic::SortEndRecalcTerainColor(void) {
     DTRACE();
 
-#ifdef MATRIXGAME_SIM_HARNESS
-    // Пересчёт цвета почвы — чисто визуальный (идёт в D3DRS_TEXTUREFACTOR), но
-    // он дёргает CalcBounds, а та кеширует габариты и время их пересчёта на
-    // 100 мс. Из-за этого кадры сдвигали момент, в который JoinToGroup брал
-    // габариты, а вместе с ними и m_GeoCenter — а он уже участвует в логике
-    // (поиск объектов, урон). В харнессе оставляем кеш логике.
-    return;
-#endif
-
     for (int i = objects_left; i < objects_rite; ++i) {
         objects[i]->RecalcTerainColor();
     }
@@ -686,23 +679,23 @@ void CMatrixMapStatic::CalcDistances(void) {
 void CMatrixMapStatic::SortEndGraphicTakt(int step) {
     DTRACE();
 
-#ifdef MATRIXGAME_SIM_HARNESS
+#ifdef MATRIXGAME_LOCKSTEP
     // objects[] — это отфильтрованный по камере список того, что попало в кадр,
     // и его состав меняется от кадра к кадру. Графический такт меняет состояние
     // симуляции (наклон корпуса, от которого зависит скорость, пыль, эффекты),
-    // поэтому в харнессе гоняем его по списку логики: ровно раз в такт и для
+    // поэтому в lockstep-режиме гоняем его по списку логики: ровно раз в такт и для
     // всех объектов, независимо от того, что видно.
     for (CMatrixMapStatic *ms = GetFirstLogic(); ms; ms = ms->GetNextLogic()) {
         ms->m_CamDistSq = D3DXVec3LengthSq(&(g_MatrixMap->m_Camera.GetFrustumCenter() - ms->m_Core->m_GeoCenter));
         ms->Takt(step);
         // Ресурсы объектов выгружает SRemindCore::Takt, а «продлевает» их
-        // BeforeDraw, то есть обе операции привязаны к кадрам. В харнессе
+        // BeforeDraw, то есть обе операции привязаны к кадрам. В lockstep-режиме
         // продлеваем на каждом такте: выгрузка и повторная загрузка графики
         // сбрасывает анимацию, а её состояние читает и логика.
         ms->m_RemindCore.Use(FREE_TIME_PERIOD);
         // Матрицу объекта игра обновляет в BeforeDraw, то есть раз в кадр.
         // Логика читает её в ответ: робот — уклон местности (Seek) и высоту,
-        // столкновения — габариты построек. Поэтому в харнессе пересобираем её
+        // столкновения — габариты построек. Поэтому в lockstep-режиме пересобираем её
         // в конце такта: флаг ставим сами, иначе его успевает снять BeforeDraw.
         ms->RChange(MR_Matrix);
         ms->RNeed(MR_Matrix);
