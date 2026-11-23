@@ -17,7 +17,7 @@
     read before being initialized.
 
 .PARAMETER AutoStart
-    Click through the game menu (ПЛАНЕТАРНЫЕ БОИ -> СТАРТ) to start the battle.
+    Click through the game menu (planetary battles -> START) to start the battle.
     The game does not enter the planetary battle module on its own, so without
     this the run just sits in the main menu. Coordinates are calibrated for
     2560x1440; pass -AutoStart:$false to drive the menu by hand.
@@ -94,8 +94,8 @@ $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $proc = Start-Process -FilePath $exe -WorkingDirectory $GameDir -PassThru
 
 # The planetary battle can only be started from the game menu: bottom-left icon
-# "planetary battles", затем "START". Координаты — доли клиентской области,
-# calibrated on 2560x1440; recalibrate for another resolution.
+# "planetary battles", then "START". Coordinates are fractions of the client
+# area, calibrated on 2560x1440; recalibrate for another resolution.
 if ($AutoStart) {
     Add-Type -TypeDefinition @'
 using System;
@@ -107,14 +107,21 @@ public class SimClick {
 }
 '@ -ErrorAction SilentlyContinue
 
-    $deadline = (Get-Date).AddSeconds(90)
-    while ($proc.MainWindowHandle -eq 0 -and -not $proc.HasExited -and (Get-Date) -lt $deadline) {
-        Start-Sleep -Milliseconds 300
+    # The window handle can be zero for the first seconds and it is not an
+    # integer, so compare against IntPtr::Zero explicitly.
+    $deadline = (Get-Date).AddSeconds(120)
+    $hwnd = [IntPtr]::Zero
+    while ((Get-Date) -lt $deadline) {
         $proc.Refresh()
+        if ($proc.HasExited) { break }
+        $h = $proc.MainWindowHandle
+        if ($h -ne $null -and $h -ne [IntPtr]::Zero) { $hwnd = $h; break }
+        Start-Sleep -Milliseconds 300
     }
-    Start-Sleep -Seconds 15  # меню рисуется не сразу
+    if ($hwnd -eq [IntPtr]::Zero) { throw "Game window did not appear" }
+    Start-Sleep -Seconds 15  # the menu is not drawn instantly
 
-    [void][SimClick]::SetForegroundWindow($proc.MainWindowHandle)
+    [void][SimClick]::SetForegroundWindow($hwnd)
 
     function ClickAt([double]$fx, [double]$fy) {
         $x = [int](2560 * $fx)
@@ -128,7 +135,7 @@ public class SimClick {
     }
 
     ClickAt 0.0438 0.948   # "planetary battles"
-    ClickAt 0.5902 0.6493  # "START" в списке карт
+    ClickAt 0.5902 0.6493  # "START" in the map list
 }
 
 if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
