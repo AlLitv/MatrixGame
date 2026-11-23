@@ -1202,6 +1202,12 @@ bool CMatrixRobot::CalcBounds(D3DXVECTOR3 &minv, D3DXVECTOR3 &maxv) {
     m_CalcBoundMax = maxv;
     m_CalcBoundsLastTime = g_MatrixMap->GetTime();
 
+#ifdef MATRIXGAME_SIM_HARNESS
+    if (SimTraceBotOn(GetId()))
+        SimTraceBotf(GetId(), "bounds min=%.9g,%.9g,%.9g max=%.9g,%.9g,%.9g", minv.x, minv.y, minv.z, maxv.x, maxv.y,
+                     maxv.z);
+#endif
+
     DCP();
 
     return false;

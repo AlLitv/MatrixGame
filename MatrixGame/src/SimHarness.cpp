@@ -1,4 +1,4 @@
-// MatrixGame - SR2 Planetary battles engine
+﻿// MatrixGame - SR2 Planetary battles engine
 // Copyright (C) 2012, Elemental Games, Katauri Interactive, CHK-Games
 // Licensed under GPLv2 or any later version
 
@@ -10,6 +10,7 @@
 
 #include "MatrixMap.hpp"
 #include "MatrixMapStatic.hpp"
+#include "MatrixObject.hpp"
 #include "MatrixRobot.hpp"
 
 #include <stdio.h>
@@ -257,6 +258,14 @@ struct SObjRec {
     int garb;
     int gofcnt;
     unsigned gof[24];
+    // Живучесть и состояние: по ним видно, что объект уничтожили в одном
+    // прогоне и не уничтожили в другом.
+    unsigned ostate;
+    float hp;
+    float hpmax;
+    int burn;
+    int bhp;
+    int bhpmax;
 };
 
 int __cdecl ObjRecCmp(const void *a, const void *b) {
@@ -290,6 +299,19 @@ void DumpObjects(FILE *f, int time) {
         r.camsq = (int)ms->GetCamDistSq();
         r.garb = -1;
         r.gofcnt = 0;
+        r.ostate = ms->GetObjectStateRaw();
+        r.hp = r.hpmax = -1.0f;
+        r.burn = r.bhp = r.bhpmax = -1;
+
+        if (r.type == OBJECT_TYPE_MAPOBJECT) {
+            // Эти два поля лежат в union: у горящего объекта это таймеры
+            // горения (m_NextTime, m_BurnTimeTotal), у ломаемого — прочность
+            // (m_BreakHitPoint, m_AnimState). Печатаем как есть, сравнение идёт
+            // между одинаковыми объектами.
+            CMatrixMapObject *mo = (CMatrixMapObject *)ms;
+            r.burn = mo->m_NextTime;
+            r.bhp = mo->m_BurnTimeTotal;
+        }
 
         if (r.type == OBJECT_TYPE_ROBOTAI) {
             CMatrixRobotAI *robot = ms->AsRobot();
@@ -346,6 +368,8 @@ void DumpObjects(FILE *f, int time) {
 
                 r.hav = robot->HaveRepair();
                 r.wcnt = robot->GetWeaponsCnt();
+                r.hp = robot->GetHitPoint();
+                r.hpmax = robot->GetMaxHitPoint();
                 r.repcnt = 0;
                 r.repflag = 0;
                 for (int u = 0; u < robot->m_UnitCnt; ++u) {
@@ -382,7 +406,7 @@ void DumpObjects(FILE *f, int time) {
                 "fx=%.9g fy=%.9g hfx=%.9g hfy=%.9g "
                 "ord=%d ph=%d p1=%.9g p2=%.9g p3=%.9g p4=%d "
                 "zc=%d zd=%d zpn=%d zpc=%d mpc=%d mpi=%d dx=%d dy=%d mx=%d my=%d ncols=%d "
-                "mdist=%.3f mfollow=%.3f hav=%d wcnt=%d rep=%d repf=%d camsq=%d garb=%d gof=",
+                "mdist=%.9g mfollow=%.9g hav=%d wcnt=%d rep=%d repf=%d camsq=%d garb=%d ostate=%x hp=%.9g hpmax=%.9g burn=%d bhp=%d gof=",
                 time, recs[i].id, recs[i].type, recs[i].side, recs[i].x, recs[i].y, recs[i].vx, recs[i].vy,
                 recs[i].speed, recs[i].rotspeed_obj, recs[i].ang, recs[i].state, recs[i].maxsp, recs[i].wcorr,
                 recs[i].scup, recs[i].scdown, recs[i].rotspeed, recs[i].grpsp, recs[i].colsp, recs[i].ux, recs[i].uy,
@@ -390,7 +414,7 @@ void DumpObjects(FILE *f, int time) {
                 recs[i].hfx, recs[i].hfy, recs[i].order, recs[i].phase, recs[i].p1, recs[i].p2, recs[i].p3, recs[i].p4,
                 recs[i].zc, recs[i].zd, recs[i].zpnext, recs[i].zpcnt, recs[i].mpcnt, recs[i].mpcur, recs[i].dx,
                 recs[i].dy, recs[i].mx, recs[i].my, recs[i].cols, recs[i].mdist, recs[i].mfollow, recs[i].hav,
-                recs[i].wcnt, recs[i].repcnt, recs[i].repflag, recs[i].camsq, recs[i].garb);
+                recs[i].wcnt, recs[i].repcnt, recs[i].repflag, recs[i].camsq, recs[i].garb, recs[i].ostate, recs[i].hp, recs[i].hpmax, recs[i].burn, recs[i].bhp);
         if (recs[i].gofcnt == 0)
             fprintf(f, "-");
         for (int g = 0; g < recs[i].gofcnt; ++g)
@@ -439,6 +463,11 @@ void SimDumpLayouts(FILE *f) {
 
 bool SimModeEnabled(void) {
     const wchar_t *v = EnvStr(L"MATRIXGAME_SIM");
+    return v && v[0] != L'0';
+}
+
+bool SimNoDraw(void) {
+    const wchar_t *v = EnvStr(L"MATRIXGAME_NODRAW");
     return v && v[0] != L'0';
 }
 

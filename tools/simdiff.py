@@ -95,21 +95,34 @@ def cmp_objlog(path_a, path_b, max_fields=40):
     first = None
     field_counter = Counter()
     object_counter = Counter()
+    shifted_ticks = 0
 
     for t in ticks:
         fa, fb = a[t], b[t]
+        # The id counter is global, so anything created before the battle (the
+        # map preview in the game menu) shifts every id by a constant. When the
+        # id sets differ but the counts match, objects are the same ones in the
+        # same creation order, so compare them positionally.
+        if set(fa) != set(fb) and len(fa) == len(fb):
+            shifted_ticks += 1
+            pairs_ids = list(zip(sorted(fa), sorted(fb)))
+        elif set(fa) != set(fb):
+            pairs_ids = [(oid, oid) for oid in sorted(set(fa) | set(fb))]
+        else:
+            pairs_ids = [(oid, oid) for oid in sorted(fa)]
+
         pairs = []
-        for oid in sorted(set(fa) | set(fb)):
-            ra, rb = fa.get(oid), fb.get(oid)
+        for oid_a, oid_b in pairs_ids:
+            ra, rb = fa.get(oid_a), fb.get(oid_b)
             if ra is None or rb is None:
-                pairs.append((oid, "present", "yes" if ra else "no", "yes" if rb else "no"))
+                pairs.append((oid_a, "present", "yes" if ra else "no", "yes" if rb else "no"))
                 continue
             for k in sorted(set(ra) | set(rb)):
                 if k in SKIP:
                     continue
                 va, vb = ra.get(k), rb.get(k)
                 if va != vb:
-                    pairs.append((oid, k, va, vb))
+                    pairs.append((oid_a, k, va, vb))
         if pairs:
             diff_ticks += 1
             if first is None:
@@ -131,6 +144,9 @@ def cmp_objlog(path_a, path_b, max_fields=40):
         print("  ... %d more" % (len(pairs) - max_fields))
 
     print("\nDiverging ticks: %d of %d (%.1f%%)" % (diff_ticks, len(ticks), 100.0 * diff_ticks / len(ticks)))
+    if shifted_ticks:
+        print("Id sets differ on %d ticks (global id counter shifted by the menu preview); "
+              "those ticks were aligned by creation order." % shifted_ticks)
     print("Top fields:")
     for k, c in field_counter.most_common(15):
         print("  %-8s %d" % (k, c))

@@ -413,6 +413,7 @@ public:
     inline DWORD GetId(void) const { return m_Id; }
 #ifdef MATRIXGAME_SIM_HARNESS
     inline float GetCamDistSq(void) const { return m_CamDistSq; }
+    inline DWORD GetObjectStateRaw(void) const { return m_ObjectState; }
 #endif
     inline const D3DXVECTOR3 &GetGeoCenter(void) const { return m_Core->m_GeoCenter; }
     inline const D3DXMATRIX &GetMatrix(void) const { return m_Core->m_Matrix; }

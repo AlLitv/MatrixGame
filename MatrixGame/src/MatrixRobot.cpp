@@ -2458,6 +2458,15 @@ bool CMatrixRobotAI::Seek(const D3DXVECTOR3 &dest, bool &rotate, bool end_path, 
         }
         m_Velocity = forward * m_Speed;
     }
+#ifdef MATRIXGAME_SIM_HARNESS
+    if (SimTraceBotOn(GetId()))
+        SimTraceBotf(GetId(),
+                     "seek st=%d end=%d back=%d rangle=%.9g dl=%.9g gs=%.9g cs=%.9g k=%.9g slope=%.9g close=%d "
+                     "sp=%.9g dest=%.9g,%.9g me=%.9g,%.9g",
+                     (int)m_CurrState, (int)end_path, (int)back, rangle, destLength, m_GroupSpeed, m_ColSpeed, k,
+                     slope, (int)((destLength - min(m_GroupSpeed, m_ColSpeed)) < 0.001f), m_Speed, dest.x, dest.y,
+                     m_PosX, m_PosY);
+#endif
     return true;
 }
 
