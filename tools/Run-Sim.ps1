@@ -43,6 +43,7 @@ param(
     [int]$TraceTo = 0,
     [bool]$AutoStart = $true,
     [switch]$NoDraw,
+    [switch]$NoZero,
     [int]$TimeoutSec = 900
 )
 
@@ -66,6 +67,7 @@ $env:MATRIXGAME_HASHLOG = Join-Path $logs "$Name.txt"
 $env:MATRIXGAME_OBJLOG = Join-Path $logs "$Name-obj.txt"
 $env:MATRIXGAME_TRACE = Join-Path $logs "$Name-trace.txt"
 if ($NoDraw) { $env:MATRIXGAME_NODRAW = '1' } else { Remove-Item Env:\MATRIXGAME_NODRAW -ErrorAction SilentlyContinue }
+if ($NoZero) { $env:MATRIXGAME_NOZERO = '1' } else { Remove-Item Env:\MATRIXGAME_NOZERO -ErrorAction SilentlyContinue }
 if ($HashStep -gt 0) { $env:MATRIXGAME_HASHSTEP = "$HashStep" } else { Remove-Item Env:\MATRIXGAME_HASHSTEP -ErrorAction SilentlyContinue }
 if ($RandLog) {
     $env:MATRIXGAME_RANDLOG = Join-Path $logs "$Name-rand.txt"
@@ -88,7 +90,7 @@ else {
 "run      : $Name"
 "map/seed : $Map / $Seed, step $Step ms, max $Ticks ms, hash step $(if ($HashStep -gt 0) { $HashStep } else { 100 }) ms"
 "alloc fill: $(if ($Fill) { "0x$Fill" } else { '00 (default)' })$(if ($Poison -gt 0) { ", stack poison $Poison B" } else { '' })$(if ($RandLog) { ', rand log on' } else { '' })"
-"autostart: $(if ($AutoStart) { 'menu -> planetary battles -> START' } else { 'off' })$(if ($NoDraw) { ', no draw' } else { '' })"
+"autostart: $(if ($AutoStart) { 'menu -> planetary battles -> START' } else { 'off' })$(if ($NoDraw) { ', no draw' } else { '' })$(if ($NoZero) { ', heap not zeroed' } else { '' })"
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $proc = Start-Process -FilePath $exe -WorkingDirectory $GameDir -PassThru

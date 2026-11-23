@@ -139,13 +139,15 @@ void CFormMatrixGame::Draw(void) {
         // g_MatrixMap->m_DI.T(L"Z rel",CWStr(g_MatrixMap->m_Camera.GetZRel()));
     }
 
-    g_MatrixMap->BeforeDraw();
-
-    // Всё, что ниже, — фаза отрисовки: rand() здесь берётся из отдельного потока,
-    // чтобы кадровые эффекты не сдвигали последовательность логики.
+    // Кадр целиком — фаза отрисовки: rand() здесь берётся из отдельного потока,
+    // чтобы кадровые эффекты не сдвигали последовательность логики. Переключаемся
+    // до BeforeDraw, потому что он тоже кадровый: он тратит числа ГПСЧ и создаёт
+    // эффекты, а раньше это шло в логический поток.
 #ifdef MATRIXGAME_SIM_HARNESS
     SimSetPhase(SIMPHASE_VISUAL);
 #endif
+    g_MatrixMap->BeforeDraw();
+
     // ASSERT_DX(g_D3DD->Clear( 0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL,
     // D3DCOLOR_XRGB(255,0,0), 1.0f, 0 ));
 
