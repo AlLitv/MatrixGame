@@ -447,6 +447,15 @@ unsigned SimSeed(unsigned fallback) {
     return v ? (unsigned)_wtoi64(v) : fallback;
 }
 
+void SimResetLogicRng(void) {
+    // Меню игры (превью карты в «Планетарных боях») живёт в том же процессе и
+    // тоже дёргает rand(), причём число вызовов зависит от того, сколько кадров
+    // провисело меню. Без сброса бой начинался бы с разных состояний потока, а
+    // от него зависят и состав войск, и все решения ИИ.
+    g_logicRngSeeded = false;
+    g_logicCalls = 0;
+}
+
 unsigned SimRand(void) {
     ++g_randCalls;
     RandRecord(_ReturnAddress());

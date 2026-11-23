@@ -204,6 +204,10 @@ void MatrixGameInit(HINSTANCE inst, HWND wnd, wchar *map, SRobotsSettings *set, 
 
 #ifdef MATRIXGAME_SIM_HARNESS
     {
+        // Бой должен начинаться с одного и того же состояния ГПСЧ независимо от
+        // того, что успело потратить меню игры до его запуска.
+        SimResetLogicRng();
+
         // Для сравнения прогонов карта должна быть одна и та же независимо
         // от того, что выбрано в меню игры.
         const wchar *forced = SimMapOverride();
