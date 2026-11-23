@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Runs one deterministic simulation pass and waits for the game to exit.
 
@@ -15,6 +15,12 @@
     Byte used to fill fresh allocations (hex, e.g. CD or AA). Empty = harness
     default (00). Comparing two runs with different fills shows which fields are
     read before being initialized.
+
+.PARAMETER AutoStart
+    Click through the game menu (ПЛАНЕТАРНЫЕ БОИ -> СТАРТ) to start the battle.
+    The game does not enter the planetary battle module on its own, so without
+    this the run just sits in the main menu. Coordinates are calibrated for
+    2560x1440; pass -AutoStart:$false to drive the menu by hand.
 
 .EXAMPLE
     .\Run-Sim.ps1 -Name run19a -Fill CD
@@ -35,6 +41,7 @@ param(
     [int]$TraceBot = 0,
     [int]$TraceFrom = 0,
     [int]$TraceTo = 0,
+    [bool]$AutoStart = $true,
     [int]$TimeoutSec = 900
 )
 
@@ -79,9 +86,49 @@ else {
 "run      : $Name"
 "map/seed : $Map / $Seed, step $Step ms, max $Ticks ms, hash step $(if ($HashStep -gt 0) { $HashStep } else { 100 }) ms"
 "alloc fill: $(if ($Fill) { "0x$Fill" } else { '00 (default)' })$(if ($Poison -gt 0) { ", stack poison $Poison B" } else { '' })$(if ($RandLog) { ', rand log on' } else { '' })"
+"autostart: $(if ($AutoStart) { 'menu -> ПЛАНЕТАРНЫЕ БОИ -> СТАРТ' } else { 'off' })"
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $proc = Start-Process -FilePath $exe -WorkingDirectory $GameDir -PassThru
+
+# Планетарный бой запускается только из меню игры: нижняя левая иконка
+# «ПЛАНЕТАРНЫЕ БОИ», затем «СТАРТ». Координаты — доли клиентской области,
+# откалиброваны на 2560x1440; при другом разрешении их надо перепроверить.
+if ($AutoStart) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class SimClick {
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, IntPtr e);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+}
+'@ -ErrorAction SilentlyContinue
+
+    $deadline = (Get-Date).AddSeconds(90)
+    while ($proc.MainWindowHandle -eq 0 -and -not $proc.HasExited -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 300
+        $proc.Refresh()
+    }
+    Start-Sleep -Seconds 15  # меню рисуется не сразу
+
+    [void][SimClick]::SetForegroundWindow($proc.MainWindowHandle)
+
+    function ClickAt([double]$fx, [double]$fy) {
+        $x = [int](2560 * $fx)
+        $y = [int](1440 * $fy)
+        [void][SimClick]::SetCursorPos($x, $y)
+        Start-Sleep -Milliseconds 250
+        [SimClick]::mouse_event(0x0002, 0, 0, 0, [IntPtr]::Zero)
+        Start-Sleep -Milliseconds 90
+        [SimClick]::mouse_event(0x0004, 0, 0, 0, [IntPtr]::Zero)
+        Start-Sleep -Milliseconds 600
+    }
+
+    ClickAt 0.0438 0.948   # «ПЛАНЕТАРНЫЕ БОИ»
+    ClickAt 0.5902 0.6493  # «СТАРТ» в списке карт
+}
+
 if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
     $proc.Kill()
     throw "Timeout after $TimeoutSec s"
