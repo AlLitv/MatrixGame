@@ -42,6 +42,7 @@ param(
     [int]$TraceFrom = 0,
     [int]$TraceTo = 0,
     [int]$CmdBot = 0,
+    [switch]$CmdBotAll,
     [string]$CmdLog = "",
     [string]$CmdReplay = "",
     [switch]$Net,
@@ -51,6 +52,11 @@ param(
     [int]$NetWaitMs = 60000,
     [string]$NetLog = "",
     [string]$NetHashLog = "",
+    [string]$NetPeer = "",
+    [string]$NetSides = "",
+    [string]$NetBind = "",
+    [int]$WindowX = -100000,
+    [int]$WindowY = 0,
     [bool]$AutoStart = $true,
     [switch]$NoDraw,
     [int]$TimeoutSec = 900
@@ -105,6 +111,7 @@ elseif ($CmdBot -gt 0) { $cmdLogPath = Join-Path $logs "$Name-cmd.txt" }
 if ($cmdLogPath) { $env:MATRIXGAME_CMDLOG = $cmdLogPath } else { Remove-Item Env:\MATRIXGAME_CMDLOG -ErrorAction SilentlyContinue }
 if ($CmdReplay) { $env:MATRIXGAME_CMDREPLAY = [System.IO.Path]::GetFullPath($CmdReplay) } else { Remove-Item Env:\MATRIXGAME_CMDREPLAY -ErrorAction SilentlyContinue }
 if ($CmdBot -gt 0) { $env:MATRIXGAME_CMDBOT = "$CmdBot" } else { Remove-Item Env:\MATRIXGAME_CMDBOT -ErrorAction SilentlyContinue }
+if ($CmdBotAll) { $env:MATRIXGAME_CMDBOT_ALL = '1' } else { Remove-Item Env:\MATRIXGAME_CMDBOT_ALL -ErrorAction SilentlyContinue }
 
 # Network layer (phase 3): UDP socket, command exchange with a peer, tick barrier,
 # world-hash comparison.
@@ -123,6 +130,10 @@ else {
     Remove-Item Env:\MATRIXGAME_NET, Env:\MATRIXGAME_NET_PORT, Env:\MATRIXGAME_NET_LOCAL_SIDE, Env:\MATRIXGAME_NET_HASH_PERIOD, Env:\MATRIXGAME_NET_WAIT_MS, Env:\MATRIXGAME_NETLOG -ErrorAction SilentlyContinue
 }
 
+if ($NetPeer) { $env:MATRIXGAME_NET_PEER = $NetPeer } else { Remove-Item Env:\MATRIXGAME_NET_PEER -ErrorAction SilentlyContinue }
+if ($NetSides) { $env:MATRIXGAME_NET_SIDES = $NetSides } else { Remove-Item Env:\MATRIXGAME_NET_SIDES -ErrorAction SilentlyContinue }
+if ($NetBind) { $env:MATRIXGAME_NET_BIND = $NetBind } else { Remove-Item Env:\MATRIXGAME_NET_BIND -ErrorAction SilentlyContinue }
+
 # The net world hash is written even without a socket, so an offline run gives the
 # reference sequence that a networked run is compared against.
 $netHashPath = ""
@@ -135,8 +146,12 @@ if ($netHashPath) { $env:MATRIXGAME_NETHASHLOG = $netHashPath } else { Remove-It
 "alloc fill: $(if ($Fill) { "0x$Fill" } else { '00 (default)' })$(if ($Poison -gt 0) { ", stack poison $Poison B" } else { '' })$(if ($RandLog) { ', rand log on' } else { '' })"
 "autostart: $(if ($AutoStart) { 'menu -> planetary battles -> START' } else { 'off' })$(if ($NoDraw) { ', no draw' } else { '' })"
 if ($CmdBot -gt 0) { "commands : bot every $CmdBot ticks -> $cmdLogPath" }
+if ($CmdBotAll -and $CmdBot -gt 0) { "commands : bot plays every human side (offline reference)" }
 if ($CmdReplay) { "commands : replay from $($env:MATRIXGAME_CMDREPLAY)" }
 if ($Net) { "net      : udp $NetPort, local side $NetLocalSide, log $netLogPath" }
+if ($NetPeer) { "net peer : $NetPeer" }
+if ($NetSides) { "net sides: $NetSides (human-controlled)" }
+if ($NetBind) { "net bind : $NetBind" }
 if ($netHashPath) { "nethash  : $netHashPath" }
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -150,15 +165,44 @@ if ($AutoStart) {
 using System;
 using System.Runtime.InteropServices;
 public class SimClick {
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+  [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, IntPtr e);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+
+  // MainWindowHandle can point at a splash or a hidden 160x28 window, and with
+  // two instances running it is easy to grab the wrong one. Pick the biggest
+  // visible window of the process instead.
+  public static IntPtr FindBigWindow(int pid, int minW, int minH) {
+    IntPtr best = IntPtr.Zero;
+    int bestArea = 0;
+    EnumWindows(delegate(IntPtr h, IntPtr l) {
+      uint p;
+      GetWindowThreadProcessId(h, out p);
+      if (p != (uint)pid) return true;
+      if (!IsWindowVisible(h)) return true;
+      RECT r;
+      if (!GetClientRect(h, out r)) return true;
+      int w = r.Right - r.Left;
+      int hh = r.Bottom - r.Top;
+      if (w < minW || hh < minH) return true;
+      if (w * hh > bestArea) { bestArea = w * hh; best = h; }
+      return true;
+    }, IntPtr.Zero);
+    return best;
+  }
 }
 '@ -ErrorAction SilentlyContinue
 
-    # The window handle can be zero for the first seconds and it is not an
-    # integer, so compare against IntPtr::Zero explicitly.
-    $deadline = (Get-Date).AddSeconds(120)
+    $deadline = (Get-Date).AddSeconds(180)
     $hwnd = [IntPtr]::Zero
     while ((Get-Date) -lt $deadline) {
         $proc.Refresh()
@@ -167,18 +211,37 @@ public class SimClick {
             # the game, Rangers.exe exits at once with code 0 and writes nothing.
             throw "Game exited immediately (code $($proc.ExitCode)). Is Steam signed in with the account that owns the game?"
         }
-        $h = $proc.MainWindowHandle
-        if ($h -ne $null -and $h -ne [IntPtr]::Zero) { $hwnd = $h; break }
+        $hwnd = [SimClick]::FindBigWindow($proc.Id, 640, 480)
+        if ($hwnd -ne [IntPtr]::Zero) { break }
         Start-Sleep -Milliseconds 300
     }
     if ($hwnd -eq [IntPtr]::Zero) { throw "Game window did not appear" }
     Start-Sleep -Seconds 15  # the menu is not drawn instantly
 
+    # Two copies of the game may run at once (netplay test): put this one at a
+    # known place so its clicks do not land on the other window.
+    if ($WindowX -gt -100000) {
+        [void][SimClick]::SetWindowPos($hwnd, [IntPtr]::Zero, $WindowX, $WindowY, 0, 0, 0x0001 -bor 0x0004)
+        Start-Sleep -Milliseconds 500
+    }
+
+    # Clicks are fractions of the client area of *this* window, not of the screen.
+    $clientRect = New-Object SimClick+RECT
+    [void][SimClick]::GetClientRect($hwnd, [ref]$clientRect)
+    $origin = New-Object SimClick+POINT
+    $origin.X = 0
+    $origin.Y = 0
+    [void][SimClick]::ClientToScreen($hwnd, [ref]$origin)
+    $clientW = $clientRect.Right - $clientRect.Left
+    $clientH = $clientRect.Bottom - $clientRect.Top
+    "window   : $hwnd at $($origin.X),$($origin.Y) size $($clientW)x$($clientH)"
+
     [void][SimClick]::SetForegroundWindow($hwnd)
 
     function ClickAt([double]$fx, [double]$fy) {
-        $x = [int](2560 * $fx)
-        $y = [int](1440 * $fy)
+        $x = $origin.X + [int]($clientW * $fx)
+        $y = $origin.Y + [int]($clientH * $fy)
+        [void][SimClick]::SetForegroundWindow($hwnd)
         [void][SimClick]::SetCursorPos($x, $y)
         Start-Sleep -Milliseconds 250
         [SimClick]::mouse_event(0x0002, 0, 0, 0, [IntPtr]::Zero)

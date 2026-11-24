@@ -197,8 +197,11 @@ Environment switches:
 | `MATRIXGAME_CMDLOG` | write the command stream to this file (it doubles as a replay) |
 | `MATRIXGAME_CMDREPLAY` | load a command log and apply it instead of generating commands |
 | `MATRIXGAME_CMDBOT` | scripted player: issue an order for the player side every N ticks |
+| `MATRIXGAME_CMDBOT_ALL` | with `CMDBOT`: the bot plays every human-controlled side (offline reference for a two-sided match) |
 | `MATRIXGAME_NET` | enable the UDP layer (phase 3) |
 | `MATRIXGAME_NET_PORT` / `MATRIXGAME_NET_BIND` | socket port and bind address; loopback by default |
+| `MATRIXGAME_NET_PEER` | `host:port` — this process greets that host instead of listening |
+| `MATRIXGAME_NET_SIDES` | which sides are human-controlled; must be identical on both machines |
 | `MATRIXGAME_NET_LOCAL_SIDE` | id of the side this process plays |
 | `MATRIXGAME_NET_HASH_PERIOD` | ticks between world-hash reports, default 50 |
 | `MATRIXGAME_NET_WAIT_MS` | how long to wait for the peer before falling back to an offline run |
@@ -268,7 +271,7 @@ python tools\simdiff.py tools\logs\p3ref.txt tools\logs\p3net.txt
 
 Verified (24.11.2026): 115 commands applied over UDP, 121 checkpoints identical to the offline run (`6328608142b739b2`), 120/120 net hashes matched. The reverse direction (the game plays, the peer only listens with `--echo --expect <the game's own cmd log>`) delivered 116/116 commands identical field by field. With `--drop-every 3` the peer loses 38 first transmissions, all are retransmitted, and both the world and all 120 hashes still match — that test also exposed a real bug: a late batch used to be queued out of order and its commands were applied on the wrong ticks (divergence at 5.5 s); `CmdTick` now scans the whole queue and sorts only what is due.
 
-Still open: a match between two simulations. Today the remote side is a script with no world of its own. Two real machines need (a) the local side to come from the lobby instead of always being the player side, and (b) a deterministic economy driver for both sides, because the AI build-up lives in `TaktHL` and is switched off together with `AUTOMATIC_MODE`. Reconnect (catch up by replaying commands from the last checkpoint) and link emulation with latency and jitter are also still to do.
+Still open: a match between two simulations. The code side is ready — `CMatrixSideUnit::m_HumanSide` decouples "this side is played by a human" from "this is the player side" (without it the second human side falls into the AI branch and the two machines diverge immediately), `MATRIXGAME_NET_SIDES` carries the list of such sides, and `MATRIXGAME_NET_PEER` turns a process into the joining client. Verified on one machine: an offline reference where the bot commands both human sides (`-CmdBotAll`) hashes `f6f085847ea64937`, and a networked run where side 1 is played locally and side 2 arrives over UDP reproduces it bit for bit (230 commands applied, 120/120 net hashes). What is missing is a second computer: `Rangers.exe` enforces a single instance ("Please terminate already running instance of the game!"), and that check is not path-based, so a junction to the same install does not help. Reconnect (catch up by replaying commands from the last checkpoint) and link emulation with latency and jitter are also still to do.
 
 ## 9. Pre-commit checklist
 

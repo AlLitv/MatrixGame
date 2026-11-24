@@ -410,15 +410,17 @@ void DumpObjects(FILE *f, int time) {
                 "fx=%.9g fy=%.9g hfx=%.9g hfy=%.9g "
                 "ord=%d ph=%d p1=%.9g p2=%.9g p3=%.9g p4=%d "
                 "zc=%d zd=%d zpn=%d zpc=%d mpc=%d mpi=%d dx=%d dy=%d mx=%d my=%d ncols=%d "
-                "mdist=%.9g mfollow=%.9g hav=%d wcnt=%d rep=%d repf=%d camsq=%d garb=%d ostate=%x hp=%.9g hpmax=%.9g burn=%d bhp=%d gof=",
+                "mdist=%.9g mfollow=%.9g hav=%d wcnt=%d rep=%d repf=%d camsq=%d garb=%d ostate=%x hp=%.9g hpmax=%.9g "
+                "burn=%d bhp=%d gof=",
                 time, recs[i].id, recs[i].type, recs[i].side, recs[i].x, recs[i].y, recs[i].vx, recs[i].vy,
                 recs[i].speed, recs[i].rotspeed_obj, recs[i].ang, recs[i].state, recs[i].maxsp, recs[i].wcorr,
                 recs[i].scup, recs[i].scdown, recs[i].rotspeed, recs[i].grpsp, recs[i].colsp, recs[i].ux, recs[i].uy,
-                recs[i].uz, recs[i].mz, recs[i].cz, recs[i].fx, recs[i].fy,
-                recs[i].hfx, recs[i].hfy, recs[i].order, recs[i].phase, recs[i].p1, recs[i].p2, recs[i].p3, recs[i].p4,
-                recs[i].zc, recs[i].zd, recs[i].zpnext, recs[i].zpcnt, recs[i].mpcnt, recs[i].mpcur, recs[i].dx,
-                recs[i].dy, recs[i].mx, recs[i].my, recs[i].cols, recs[i].mdist, recs[i].mfollow, recs[i].hav,
-                recs[i].wcnt, recs[i].repcnt, recs[i].repflag, recs[i].camsq, recs[i].garb, recs[i].ostate, recs[i].hp, recs[i].hpmax, recs[i].burn, recs[i].bhp);
+                recs[i].uz, recs[i].mz, recs[i].cz, recs[i].fx, recs[i].fy, recs[i].hfx, recs[i].hfy, recs[i].order,
+                recs[i].phase, recs[i].p1, recs[i].p2, recs[i].p3, recs[i].p4, recs[i].zc, recs[i].zd, recs[i].zpnext,
+                recs[i].zpcnt, recs[i].mpcnt, recs[i].mpcur, recs[i].dx, recs[i].dy, recs[i].mx, recs[i].my,
+                recs[i].cols, recs[i].mdist, recs[i].mfollow, recs[i].hav, recs[i].wcnt, recs[i].repcnt,
+                recs[i].repflag, recs[i].camsq, recs[i].garb, recs[i].ostate, recs[i].hp, recs[i].hpmax, recs[i].burn,
+                recs[i].bhp);
         if (recs[i].gofcnt == 0)
             fprintf(f, "-");
         for (int g = 0; g < recs[i].gofcnt; ++g)
@@ -795,6 +797,17 @@ bool SimCommandBotEnabled(void) {
     return CmdBotPeriod() > 0;
 }
 
+// Офлайн-режим «оба игрока за одним столом»: бот командует всеми сторонами,
+// за которые играют люди. Нужен, чтобы снять эталонный лог для сетевого теста.
+static bool CmdBotAll(void) {
+    static int v = -1;
+    if (v < 0) {
+        const wchar_t *s = EnvStr(L"MATRIXGAME_CMDBOT_ALL");
+        v = (s && s[0] != L'0') ? 1 : 0;
+    }
+    return v != 0;
+}
+
 // Ставит одного робота в очередь сборки базы. Это тот же путь, которым строит
 // ИИ (CMatrixSideUnit::BuildRobot) и человек (кнопка в конструкторе), только без
 // списания ресурсов: для проверки слоя команд важна не экономика, а то, что
@@ -820,89 +833,108 @@ void SimCommandBotTick(int tick) {
     if (period <= 0 || tick <= 0 || !g_MatrixMap)
         return;
 
-    CMatrixSideUnit *ps = g_MatrixMap->GetPlayerSide();
-    if (!ps || ps->GetStatus() == SS_NONE)
-        return;
+    // Экономика сторон, за которые играют люди, пока остаётся за старым
+    // ИИ-стройщиком: армией командует скрипт, но роботов по-прежнему строит база.
+    // Строительство как команда — следующий шаг фазы 2 (docs/NETPLAY_PLAN.md §5).
+    // Период фиксирован, поэтому прогон по логу делает ровно те же вызовы.
+    if ((tick % 25) == 0 && SSpecialBot::m_AIRobotTypeList && SSpecialBot::m_AIRobotTypeCnt > 0) {
+        for (int i = 0; i < g_MatrixMap->m_SideCnt; ++i) {
+            CMatrixSideUnit *s = &g_MatrixMap->m_Side[i];
+            if (s->m_HumanSide && s->GetStatus() != SS_NONE)
+                BotBuildRobot(s);
+        }
+    }
 
-    // Экономика стороны игрока пока остаётся за старым ИИ-стройщиком: армией
-    // командует скрипт, но роботов по-прежнему строит база. Строительство как
-    // команда — следующий шаг фазы 2 (docs/NETPLAY_PLAN.md §5). Период фиксирован,
-    // поэтому прогон по логу делает ровно те же вызовы.
-    if ((tick % 25) == 0 && SSpecialBot::m_AIRobotTypeList && SSpecialBot::m_AIRobotTypeCnt > 0)
-        BotBuildRobot(ps);
-
-    // В сетевом режиме сторона игрока может принадлежать партнёру — тогда свои
-    // приказы не генерируем, они придут из сети.
     if (CmdReplayMode() || (tick % period) != 0)
         return;
-    if (NetIsActive() && NetRemoteSide() == ps->m_Id)
-        return;
 
-    SCommand cmd;
-    ZeroMemory(&cmd, sizeof(cmd));
-    cmd.m_ObjId = -1;
-    cmd.m_Side = ps->m_Id;
+    // Кем командует бот: в сети — только своей стороной (за остальные играет
+    // партнёр), офлайн с MATRIXGAME_CMDBOT_ALL — всеми «людьми» сразу, иначе
+    // только стороной игрока. OFFLINE-эталон для сетевого теста снимается
+    // именно вторым режимом: в логе оказываются приказы обеих сторон.
+    int sideIdx[CMD_SIDE_MAX];
+    int sideCnt = 0;
 
-    // Выделение — все живые роботы стороны: бот не пользуется мышью, поэтому
-    // вместо UI-группы он каждый раз собирает полный список.
-    int ownCnt = 0, cx = 0, cy = 0;
-    for (CMatrixMapStatic *obj = CMatrixMapStatic::GetFirstLogic(); obj; obj = obj->GetNextLogic()) {
-        if (!obj->IsLiveRobot() || obj->GetSide() != ps->m_Id)
+    for (int i = 0; i < g_MatrixMap->m_SideCnt && sideCnt < CMD_SIDE_MAX; ++i) {
+        CMatrixSideUnit *s = &g_MatrixMap->m_Side[i];
+        if (s->GetStatus() == SS_NONE || !s->m_HumanSide)
             continue;
-        if (cmd.m_SelCnt < CMD_SEL_MAX)
-            cmd.m_Sel[cmd.m_SelCnt++] = (int)obj->GetId();
-        CPoint p = CmdObjectPos(obj);
-        cx += p.x;
-        cy += p.y;
-        ++ownCnt;
-    }
-    if (cmd.m_SelCnt <= 0)
-        return;
-    cx /= ownCnt;
-    cy /= ownCnt;
 
-    // Цель — k-й по счёту живой враг в списке логики. Порядок обхода задаёт
-    // симуляция, поэтому выбор одинаков во всех прогонах с тем же миром.
-    CMatrixMapStatic *targets[32];
-    int cnt = 0;
-    for (CMatrixMapStatic *obj = CMatrixMapStatic::GetFirstLogic(); obj; obj = obj->GetNextLogic()) {
-        if (cnt >= 32)
-            break;
-        if (obj->GetSide() == ps->m_Id)
-            continue;
-        if (obj->IsLiveRobot() || obj->IsLiveCannon())
-            targets[cnt++] = obj;
+        const bool take =
+                NetIsActive() ? (s->m_Id == NetLocalSide()) : (CmdBotAll() || s == g_MatrixMap->GetPlayerSide());
+        if (take)
+            sideIdx[sideCnt++] = i;
     }
 
     const int k = tick / period;
 
-    if ((k % 7) == 6) {
-        cmd.m_Type = CMD_STOP;
-    }
-    else if (cnt > 0) {
-        CPoint tp = CmdObjectPos(targets[k % cnt]);
-        int dx = ((k * 7) % 21) - 10;
-        int dy = ((k * 11) % 21) - 10;
+    for (int sidx = 0; sidx < sideCnt; ++sidx) {
+        CMatrixSideUnit *ps = &g_MatrixMap->m_Side[sideIdx[sidx]];
 
-        if ((k % 4) == 3) {
-            cmd.m_Type = CMD_MOVE_TO;
-            cmd.m_X = tp.x + dx;
-            cmd.m_Y = tp.y + dy;
+        SCommand cmd;
+        ZeroMemory(&cmd, sizeof(cmd));
+        cmd.m_ObjId = -1;
+        cmd.m_Side = ps->m_Id;
+
+        // Выделение — все живые роботы стороны: бот не пользуется мышью, поэтому
+        // вместо UI-группы он каждый раз собирает полный список.
+        int ownCnt = 0, cx = 0, cy = 0;
+        for (CMatrixMapStatic *obj = CMatrixMapStatic::GetFirstLogic(); obj; obj = obj->GetNextLogic()) {
+            if (!obj->IsLiveRobot() || obj->GetSide() != ps->m_Id)
+                continue;
+            if (cmd.m_SelCnt < CMD_SEL_MAX)
+                cmd.m_Sel[cmd.m_SelCnt++] = (int)obj->GetId();
+            CPoint p = CmdObjectPos(obj);
+            cx += p.x;
+            cy += p.y;
+            ++ownCnt;
+        }
+        if (cmd.m_SelCnt <= 0)
+            continue;
+        cx /= ownCnt;
+        cy /= ownCnt;
+
+        // Цель — k-й по счёту живой враг в списке логики. Порядок обхода задаёт
+        // симуляция, поэтому выбор одинаков во всех прогонах с тем же миром.
+        CMatrixMapStatic *targets[32];
+        int cnt = 0;
+        for (CMatrixMapStatic *obj = CMatrixMapStatic::GetFirstLogic(); obj; obj = obj->GetNextLogic()) {
+            if (cnt >= 32)
+                break;
+            if (obj->GetSide() == ps->m_Id)
+                continue;
+            if (obj->IsLiveRobot() || obj->IsLiveCannon())
+                targets[cnt++] = obj;
+        }
+
+        if ((k % 7) == 6) {
+            cmd.m_Type = CMD_STOP;
+        }
+        else if (cnt > 0) {
+            CPoint tp = CmdObjectPos(targets[k % cnt]);
+            int dx = ((k * 7) % 21) - 10;
+            int dy = ((k * 11) % 21) - 10;
+
+            if ((k % 4) == 3) {
+                cmd.m_Type = CMD_MOVE_TO;
+                cmd.m_X = tp.x + dx;
+                cmd.m_Y = tp.y + dy;
+            }
+            else {
+                cmd.m_Type = CMD_ATTACK;
+                cmd.m_ObjId = (int)targets[k % cnt]->GetId();
+                cmd.m_X = tp.x;
+                cmd.m_Y = tp.y;
+            }
         }
         else {
-            cmd.m_Type = CMD_ATTACK;
-            cmd.m_ObjId = (int)targets[k % cnt]->GetId();
-            cmd.m_X = tp.x;
-            cmd.m_Y = tp.y;
+            cmd.m_Type = CMD_MOVE_TO;
+            cmd.m_X = cx + ((k * 13) % 31) - 15;
+            cmd.m_Y = cy + ((k * 17) % 31) - 15;
         }
-    }
-    else {
-        cmd.m_Type = CMD_MOVE_TO;
-        cmd.m_X = cx + ((k * 13) % 31) - 15;
-        cmd.m_Y = cy + ((k * 17) % 31) - 15;
-    }
 
-    CmdIssue(cmd);
+        CmdIssue(cmd);
+    }
 }
 
 #endif  // MATRIXGAME_SIM_HARNESS

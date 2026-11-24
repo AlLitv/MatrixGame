@@ -438,6 +438,11 @@ public:
     int m_Id;
     CWStr m_Name;
 
+    // Сторона под управлением игрока (а не ИИ). В одиночной игре это сторона
+    // PLAYER_SIDE; в сетевом матче — все стороны, за которые играют люди, и
+    // признак обязан совпадать на обеих машинах, иначе миры разъедутся.
+    bool m_HumanSide;
+
     DWORD m_Color;
     DWORD m_ColorMM;
     CTexture *m_ColorTexture;

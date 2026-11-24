@@ -998,6 +998,7 @@ void CMatrixMap::LoadSide(CBlockPar &bp) {
         }
 
         m_Side[idx].m_Id = id;
+        m_Side[idx].m_HumanSide = (id == PLAYER_SIDE);
 
         m_Side[idx].m_Constructor->SetSide(id);
         m_Side[idx].m_Color = color;

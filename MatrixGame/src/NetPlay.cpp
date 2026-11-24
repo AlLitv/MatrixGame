@@ -123,6 +123,8 @@ bool g_InitDone = false;
 
 sockaddr_in g_Peer;
 bool g_PeerKnown = false;
+bool g_PeerConfigured = false;  // адрес партнёра задан в MATRIXGAME_NET_PEER
+unsigned long long g_LastHelloMs = 0;
 
 int g_LocalSide = 0;
 int g_PeerSide = -1;
@@ -387,6 +389,7 @@ void HandleHello(SReader &r, const sockaddr_in &from) {
         b.U32(RndMatchSeed());
         b.U32(LOGIC_TAKT_PERIOD);
         b.U32(CMD_INPUT_LAG_TICKS);
+        b.U32((unsigned)g_LocalSide);
         SendRaw(NET_HELLO_ACK, b.m_Data, b.m_Len);
         Log("HELLO rejected: peer seed %u, local seed %u", seed, RndMatchSeed());
         return;
@@ -400,10 +403,37 @@ void HandleHello(SReader &r, const sockaddr_in &from) {
     b.U32(RndMatchSeed());
     b.U32(LOGIC_TAKT_PERIOD);
     b.U32(CMD_INPUT_LAG_TICKS);
+    b.U32((unsigned)g_LocalSide);
     SendRaw(NET_HELLO_ACK, b.m_Data, b.m_Len);
 
     if (first)
         Log("HELLO from %s, peer side %d, seed %u", inet_ntoa(from.sin_addr), g_PeerSide, seed);
+}
+
+void HandleHelloAck(SReader &r, const sockaddr_in &from) {
+    unsigned ok = r.U32();
+    unsigned seed = r.U32();
+    (void)r.U32();  // период такта
+    (void)r.U32();  // лаг ввода
+    unsigned side = r.U32();
+
+    if (!ok) {
+        Log("HELLO rejected by host: seed %u, local seed %u", seed, RndMatchSeed());
+        g_Stopped = true;
+        g_ExitState = 1;
+        SETFLAG(g_Flags, GFLAG_EXITLOOP);
+        return;
+    }
+
+    if (g_Connected)
+        return;
+
+    g_Peer = from;
+    g_PeerKnown = true;
+    g_PeerSide = (int)side;
+    g_Connected = true;
+
+    Log("HELLO_ACK from %s, peer side %d, seed %u", inet_ntoa(from.sin_addr), g_PeerSide, seed);
 }
 
 void HandleCmd(SReader &r) {
@@ -548,6 +578,10 @@ void Receive(void) {
             case NET_HELLO:
                 HandleHello(r, from);
                 break;
+            case NET_HELLO_ACK:
+                if (r.Has(20))
+                    HandleHelloAck(r, from);
+                break;
             case NET_CMD:
                 HandleCmd(r);
                 break;
@@ -610,8 +644,54 @@ void NetInit(void) {
         }
     }
 
-    if (!EnvStr(L"MATRIXGAME_NET") || EnvStr(L"MATRIXGAME_NET")[0] == L'0')
+    const bool netEnabled = EnvStr(L"MATRIXGAME_NET") && EnvStr(L"MATRIXGAME_NET")[0] != L'0';
+
+    // Стороны, за которые играют люди. Список обязан совпадать на обеих
+    // машинах: это часть правил матча, а не настройка клиента. Читается и без
+    // сокета: офлайн-прогон с двумя «людьми» даёт эталон для сети.
+    const wchar_t *sides = EnvStr(L"MATRIXGAME_NET_SIDES");
+    if (sides && g_MatrixMap) {
+        for (int i = 0; i < g_MatrixMap->m_SideCnt; ++i) {
+            const int id = g_MatrixMap->m_Side[i].m_Id;
+            bool found = false;
+            for (const wchar_t *p = sides; *p && !found;) {
+                while (*p == L' ' || *p == L',')
+                    ++p;
+                if (!*p)
+                    break;
+                if (_wtoi(p) == id)
+                    found = true;
+                while (*p && *p != L',')
+                    ++p;
+            }
+            g_MatrixMap->m_Side[i].m_HumanSide = found;
+        }
+    }
+
+    if (!netEnabled)
         return;
+
+    // MATRIXGAME_NET_PEER=ip:port — этот процесс сам стучится к партнёру.
+    const wchar_t *peerW = EnvStr(L"MATRIXGAME_NET_PEER");
+    if (peerW) {
+        char peerBuf[128];
+        peerBuf[0] = 0;
+        WideCharToMultiByte(CP_ACP, 0, peerW, -1, peerBuf, sizeof(peerBuf), NULL, NULL);
+
+        char host[64];
+        int port = 0;
+        host[0] = 0;
+        if (sscanf(peerBuf, "%63[^:]:%d", host, &port) >= 1 && host[0]) {
+            if (port <= 0)
+                port = 27777;
+            ZeroMemory(&g_Peer, sizeof(g_Peer));
+            g_Peer.sin_family = AF_INET;
+            g_Peer.sin_port = htons((unsigned short)port);
+            g_Peer.sin_addr.s_addr = inet_addr(host);
+            g_PeerKnown = true;
+            g_PeerConfigured = true;
+        }
+    }
 
     const wchar_t *logPath = EnvStr(L"MATRIXGAME_NETLOG");
     if (logPath) {
@@ -711,6 +791,17 @@ void NetPump(void) {
     Receive();
 
     if (!g_Connected) {
+        // Клиент сам представляется хосту, пока не получит HELLO_ACK.
+        if (g_PeerConfigured && NowMs() - g_LastHelloMs >= 200) {
+            g_LastHelloMs = NowMs();
+
+            SBuf b;
+            b.Reset();
+            b.U32((unsigned)g_LocalSide);
+            b.U32(RndMatchSeed());
+            SendRaw(NET_HELLO, b.m_Data, b.m_Len);
+        }
+
         if (g_WaitMs > 0 && NowMs() - g_StartMs > (unsigned long long)g_WaitMs) {
             Log("peer did not connect in %d ms, running offline", g_WaitMs);
             g_Active = false;

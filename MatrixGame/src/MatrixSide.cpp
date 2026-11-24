@@ -171,6 +171,7 @@ CMatrixSideUnit::CMatrixSideUnit()
     m_ArcadedP_available = 0;
 
     m_Id = 0;
+    m_HumanSide = false;
     // m_Color=0;
     m_ColorTexture = NULL;
 
@@ -437,7 +438,12 @@ void CMatrixSideUnit::LogicTakt(int ms) {
     }
 
     DCP();
-    if (g_MatrixMap->GetPlayerSide() != this || FLAG(g_MatrixMap->m_Flags, MMFLAG_AUTOMATIC_MODE)) {
+    // Сторона под управлением человека идёт по «игроковой» ветке (приказы из
+    // очереди), остальные — по ИИ. Раньше признаком служило «это сторона
+    // игрока», но в сетевом матче людей может быть двое, и на обеих машинах
+    // одна и та же сторона обязана идти одной и той же веткой.
+    const bool humanSide = m_HumanSide && !FLAG(g_MatrixMap->m_Flags, MMFLAG_AUTOMATIC_MODE);
+    if (!humanSide) {
         if (m_Id == PLAYER_SIDE) {
             if (!g_MatrixMap->MaintenanceDisabled()) {
                 if (g_MatrixMap->BeforeMaintenanceTime() == 0 && (FRND(1) < 0.05f)) {

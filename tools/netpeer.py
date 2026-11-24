@@ -144,7 +144,9 @@ CMP_FIELDS = ('tick', 'side', 'type', 'obj', 'x', 'y', 'flags', 'sel')
 class Peer(object):
     def __init__(self, args):
         self.args = args
-        self.cmds = parse_cmdlog(args.cmds) if args.cmds else []
+        cmds = parse_cmdlog(args.cmds) if args.cmds else []
+        # Играем только своей стороной: лог может содержать приказы обеих.
+        self.cmds = [c for c in cmds if c['side'] == args.side] if args.filter_side else cmds
         self.ref = parse_ref(args.ref) if args.ref else {}
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -415,6 +417,8 @@ def main():
     ap.add_argument('--local-port', type=int, default=27778, help='local UDP port')
     ap.add_argument('--seed', type=int, default=12345)
     ap.add_argument('--side', type=int, default=1)
+    ap.add_argument('--filter-side', action='store_true',
+                    help='play only the commands of --side from the log (a two-sided log)')
     ap.add_argument('--cmds', default='', help='command log to play back')
     ap.add_argument('--expect', default='', help='command log the host is expected to send (echo mode)')
     ap.add_argument('--echo', action='store_true', help='do not play: accept the host commands and compare')
