@@ -275,28 +275,19 @@ inline void *CHeap::AllocClearEx(void *buf, uint size, const char *file, int lin
 #endif
 
 #ifdef MATRIXGAME_LOCKSTEP
-// Байт заливки свежих аллокаций для харнесса детерминизма.
+// Байт заливки свежих аллокаций. Возвращает -1, когда заливка не задана, — и
+// тогда память не трогаем вообще: именно так игра и должна работать. Число
+// (hex в MATRIXGAME_FILL) включает диагностический режим: пара прогонов с 0xCD
+// и 0xAA показывает, какие поля читаются до записи (у них в дампе будет стоять
+// байт заливки, а значения разъедутся).
 inline int CHeapSimFill(void) {
-    static int fill = -1;
-    if (fill < 0) {
+    static int fill = -2;
+    if (fill == -2) {
         wchar_t buf[16];
         DWORD len = GetEnvironmentVariableW(L"MATRIXGAME_FILL", buf, 16);
-        fill = (len > 0 && len < 16) ? (int)(wcstoul(buf, NULL, 16) & 0xFF) : 0;
+        fill = (len > 0 && len < 16) ? (int)(wcstoul(buf, NULL, 16) & 0xFF) : -1;
     }
     return fill;
-}
-
-// Зануление свежих аллокаций выключается MATRIXGAME_NOZERO=1. Это проверка
-// гипотезы «движок больше не читает неинициализированную память»: если пара
-// прогонов 0xCD/0xAA совпадает и с занулением, и без него, костыль можно убрать.
-inline bool CHeapSimNoZero(void) {
-    static int nozero = -1;
-    if (nozero < 0) {
-        wchar_t buf[8];
-        DWORD len = GetEnvironmentVariableW(L"MATRIXGAME_NOZERO", buf, 8);
-        nozero = (len > 0 && len < 8 && buf[0] != L'0') ? 1 : 0;
-    }
-    return nozero != 0;
 }
 #endif
 
@@ -309,12 +300,10 @@ inline void *CHeap::Alloc(size_t size) {
     if (buf == NULL)
         AllocationError(size);
 #ifdef MATRIXGAME_LOCKSTEP
-    // Детерминированный аллокатор: заливаем свежую память одним и тем же байтом.
-    // Значение берётся из MATRIXGAME_FILL (hex), по умолчанию 0. Сравнение
-    // прогонов с 0xCD и 0xAA показывает, какие поля читаются неинициализированными:
-    // у них в дампе и будет стоять байт заливки.
-    if (!CHeapSimNoZero())
-        memset(buf, CHeapSimFill(), size);
+    // Диагностическая заливка: только когда MATRIXGAME_FILL задан явно.
+    const int fill = CHeapSimFill();
+    if (fill >= 0)
+        memset(buf, fill, size);
 #endif
     return buf;
 }
