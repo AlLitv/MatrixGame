@@ -372,14 +372,14 @@ void DumpObjects(FILE *f, int time) {
                 r.hpmax = robot->GetMaxHitPoint();
                 r.repcnt = 0;
                 r.repflag = 0;
+                // Указатель на ремонтные данные не разыменовываем: он живёт своей
+                // жизнью (Release/Allocate) и на большом бою дамп на нём падал.
+                // Для сравнения прогонов достаточно того, что он есть или нет.
                 for (int u = 0; u < robot->m_UnitCnt; ++u) {
-                    SWeaponRepairData *rep = robot->m_Unit[u].m_WeaponRepairData;
-                    if (rep) {
+                    if (robot->m_Unit[u].m_WeaponRepairData)
                         ++r.repcnt;
-                        if (FLAG(rep->m_Flags, SWeaponRepairData::CAN_BE_DRAWN))
-                            ++r.repflag;
-                    }
                 }
+                r.repflag = robot->HaveRepair() ? 1 : 0;
 
                 const unsigned char fill = SimFillByte();
                 if (fill) {
