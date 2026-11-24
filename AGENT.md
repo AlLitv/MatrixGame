@@ -243,7 +243,9 @@ python tools\simdiff.py tools\logs\p2a.txt tools\logs\p2c.txt
 
 Result (24.11.2026, 60 s of game time, 116 commands, 121 checkpoints): `armagedd`/12345 — two generation passes are identical (`6328608142b739b2`) and the replay of the first one is identical to both; the two command logs are byte-identical. `crossfire`/4242 — replay identical to generation (`eac52acc462d8868`).
 
-Still outside the stream (the next step of Phase 2): building robots and turrets (`CConstructorPanel`, `m_CurrentAction == BUILDING_TURRET`), flyer orders (`CMatrixFlyer::SetTarget` runs at frame time and consumes logic-RNG numbers there), entering/leaving a robot (arcade mode) and the multi-selection UI state.
+Still open (Phase 2 leftovers): turrets (`m_CurrentAction == BUILDING_TURRET`), flyer orders (`CMatrixFlyer::SetTarget` runs at frame time and consumes logic-RNG numbers there), entering/leaving a robot (arcade mode) and the multi-selection UI state.
+
+Pauses are single-player only. Opening the base constructor pauses the battle (`CConstructorPanel::ActivateAndSelect` → `Pause(true)`) and so do dialogs and the Pause key — that is how SR2 single player works, but in a network match a local pause freezes only this machine, and the command that would end it can never be applied because the simulation is stopped. With `MATRIXGAME_NET` the pause is therefore not engaged at all (the panel and the menu open on a live battle), and the paused branch still pumps the socket. A shared pause agreed by both players is Phase 4.
 
 ### Netplay layer (Phase 3)
 

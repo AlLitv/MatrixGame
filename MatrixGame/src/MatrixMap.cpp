@@ -27,6 +27,7 @@
 #include "Logic/MatrixTactics.h"
 #include "MatrixGameDll.hpp"
 #include "MatrixSampleStateManager.hpp"
+#include "NetPlay.hpp"
 
 #define RENDER_PROJ_SHADOWS_IN_STENCIL_PASS
 
@@ -3135,7 +3136,8 @@ void CMatrixMap::LeaveDialogMode(void) {
     }
 
     RESETFLAG(m_Flags, MMFLAG_DIALOG_MODE);
-    Pause(false);
+    if (!NetIsActive())
+        Pause(false);
     DWORD *a = m_DialogModeHints.Buff<DWORD>();
     DWORD *b = m_DialogModeHints.BuffEnd<DWORD>();
     for (; a < b; ++a) {
@@ -3273,7 +3275,12 @@ void CMatrixMap::EnterDialogMode(const wchar *hint_i) {
         m_PauseHint = NULL;
     }
     LeaveDialogMode();
-    Pause(true);
+
+    // В сетевом матче пауза «для себя» остановила бы только эту машину: партнёр
+    // продолжил бы ждать, а снять паузу приказом нельзя — симуляция стоит.
+    // Общая пауза по согласию сторон — задача фазы 4.
+    if (!NetIsActive())
+        Pause(true);
     SETFLAG(m_Flags, MMFLAG_DIALOG_MODE);
     m_DialogModeName = hint_i;
 

@@ -13,6 +13,7 @@
 #include "Effects/MatrixEffect.hpp"
 #include "Interface/CInterface.h"
 #include "CmdQueue.hpp"
+#include "NetPlay.hpp"
 #include "MatrixMultiSelection.hpp"
 #include "MatrixMapStatic.hpp"
 #include "Interface/CIFaceMenu.h"
@@ -1234,7 +1235,10 @@ void CFormMatrixGame::Keyboard(bool down, int scan) {
 
         CMatrixSideUnit *ps = g_MatrixMap->GetPlayerSide();
         if (scan == KEY_PAUSE) {
-            g_MatrixMap->Pause(!g_MatrixMap->IsPaused());
+            // В сетевом матче пауза заморозила бы только свою машину (см.
+            // CMatrixMap::EnterDialogMode); общая пауза — задача фазы 4.
+            if (!NetIsActive())
+                g_MatrixMap->Pause(!g_MatrixMap->IsPaused());
             return;
         }
 

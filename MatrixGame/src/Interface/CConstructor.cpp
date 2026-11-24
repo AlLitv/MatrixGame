@@ -15,6 +15,7 @@
 #include "CHistory.h"
 #include "../Effects/MatrixEffectWeapon.hpp"
 #include "../CmdQueue.hpp"
+#include "../NetPlay.hpp"
 
 CConstructor::CConstructor() {
     m_ViewPosX = 0;
@@ -1048,7 +1049,12 @@ void CConstructorPanel::ActivateAndSelect() {
     m_Active = 1;
 
     g_IFaceList->CreateSummPrice();
-    g_MatrixMap->Pause(true);
+
+    // В одиночной игре конструктор останавливает бой — так задумано. В сетевом
+    // матче пауза была бы только у одного игрока: второй продолжал бы ждать, а
+    // приказ на снятие паузы не прошёл бы через остановленную симуляцию.
+    if (!NetIsActive())
+        g_MatrixMap->Pause(true);
 }
 // void CConstructorPanel::FocusElement(void* object)
 //{
@@ -1064,7 +1070,8 @@ void CConstructorPanel::ResetGroupNClose() {
     if (FLAG(g_IFaceList->m_IfListFlags, POPUP_MENU_ACTIVE) && g_PopupMenu) {
         g_PopupMenu->ResetMenu(true);
     }
-    g_MatrixMap->Pause(false);
+    if (!NetIsActive())
+        g_MatrixMap->Pause(false);
 }
 
 bool CConstructorPanel::IsEnoughResourcesForThisPieceOfShit(int pilon, ERobotUnitType type, ERobotUnitKind kind) {

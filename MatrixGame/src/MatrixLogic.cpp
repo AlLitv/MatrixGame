@@ -2892,6 +2892,11 @@ void CMatrixMapLogic::Takt(int step) {
     }
 
     if (IsPaused()) {
+        // Даже на паузе принимаем пакеты: иначе партнёр видит мёртвый сокет и
+        // его барьер такта не сдвигается.
+        if (NetIsActive())
+            NetPump();
+
         if (m_PauseHint == NULL && g_RangersInterface && !FLAG(m_Flags, MMFLAG_DIALOG_MODE)) {
             m_PauseHint = CMatrixHint::Build(CWStr(TEMPLATE_PAUSE, g_CacheHeap));
             m_PauseHint->Show(14, 62);
