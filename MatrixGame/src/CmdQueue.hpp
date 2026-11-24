@@ -37,7 +37,9 @@ enum ECommandType {
     CMD_AUTO_CAPTURE,
     CMD_AUTO_ATTACK,
     CMD_AUTO_DEFENCE,
-    CMD_BUILD_ROBOT,  // построить робота на базе: m_Param[0] — тип, m_Param[1] — сколько
+    // Построить робота на базе по описанию: m_Param[0] корпус, [1] броня,
+    // [2] голова, [3..7] оружие, [8] сколько.
+    CMD_BUILD_ROBOT,
 
     CMD_TYPE_MAX
 };
@@ -51,8 +53,9 @@ enum ECommandFlags {
 // MAX_ROBOTS == 60, больше роботов в выделении быть не может.
 #define CMD_SEL_MAX 64
 
-// Небольшой набор целых параметров под тип команды (постройка робота и т.п.).
-#define CMD_PARAM_CNT 4
+// Небольшой набор целых параметров под тип команды (постройка робота: корпус,
+// броня, голова, 5 оружий, количество).
+#define CMD_PARAM_CNT 9
 
 // Стороны нумеруются маленькими id (0 — нейтрал, 1 — игрок).
 #define CMD_SIDE_MAX 16

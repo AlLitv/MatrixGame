@@ -839,14 +839,19 @@ void SimCommandBotTick(int tick) {
     // мимо очереди, и в сети это был бы единственный оставшийся рассинхрон.
     if (SSpecialBot::m_AIRobotTypeCnt > 0 && (tick % 25) == 0) {
         const int typeIdx = (tick / 25) % SSpecialBot::m_AIRobotTypeCnt;
+        const SSpecialBot &bot = SSpecialBot::m_AIRobotTypeList[typeIdx];
         for (int sidx = 0; sidx < sideCnt; ++sidx) {
             SCommand cmd;
             ZeroMemory(&cmd, sizeof(cmd));
             cmd.m_Type = CMD_BUILD_ROBOT;
             cmd.m_Side = g_MatrixMap->m_Side[sideIdx[sidx]].m_Id;
             cmd.m_ObjId = -1;  // базу выберет применение: своя живая база стороны
-            cmd.m_Param[0] = typeIdx;
-            cmd.m_Param[1] = 1;
+            cmd.m_Param[0] = (int)bot.m_Chassis.m_nKind;
+            cmd.m_Param[1] = (int)bot.m_Armor.m_Unit.m_nKind;
+            cmd.m_Param[2] = (int)bot.m_Head.m_nKind;
+            for (int w = 0; w < MAX_WEAPON_CNT; ++w)
+                cmd.m_Param[3 + w] = (int)bot.m_Weapon[w].m_Unit.m_nKind;
+            cmd.m_Param[8] = 1;
             CmdIssue(cmd);
         }
     }

@@ -215,7 +215,11 @@ public class SimClick {
         if ($hwnd -ne [IntPtr]::Zero) { break }
         Start-Sleep -Milliseconds 300
     }
-    if ($hwnd -eq [IntPtr]::Zero) { throw "Game window did not appear" }
+    if ($hwnd -eq [IntPtr]::Zero) {
+        # A stuck process holds the DLL and blocks the next run, so kill it first.
+        if (-not $proc.HasExited) { $proc.Kill() }
+        throw "Game window did not appear"
+    }
     Start-Sleep -Seconds 15  # the menu is not drawn instantly
 
     # Two copies of the game may run at once (netplay test): put this one at a

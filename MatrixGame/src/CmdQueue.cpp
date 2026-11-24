@@ -267,15 +267,15 @@ void CmdBreakOrders(const SCommand &c) {
     }
 }
 
-// Постройка робота. Идёт через тот же конструктор, что и у ИИ, и по той же
-// таблице типов (она грузится из данных игры, поэтому одинакова на всех
-// машинах), но с проверкой ресурсов и лимита — как у человека в интерфейсе.
+// Постройка робота по описанию — тем же конструктором, что и у ИИ, и с теми же
+// проверками, что у человека в интерфейсе (лимит роботов и цена в ресурсах).
 void CmdApplyBuild(CMatrixSideUnit *su, const SCommand &c) {
-    if (!SSpecialBot::m_AIRobotTypeList || SSpecialBot::m_AIRobotTypeCnt <= 0)
+    if (!g_MatrixMap || !su->m_Constructor)
         return;
 
-    const int idx = c.m_Param[0];
-    if (idx < 0 || idx >= SSpecialBot::m_AIRobotTypeCnt)
+    // Без корпуса и брони конструктор считать нечего (и матрица оружия
+    // индексируется номером брони с единицы).
+    if (c.m_Param[0] <= 0 || c.m_Param[1] <= 0)
         return;
 
     CMatrixBuilding *base = NULL;
@@ -295,22 +295,36 @@ void CmdApplyBuild(CMatrixSideUnit *su, const SCommand &c) {
     if (!base)
         return;
 
-    const SSpecialBot &bot = SSpecialBot::m_AIRobotTypeList[idx];
-    int count = c.m_Param[1] > 0 ? c.m_Param[1] : 1;
+    CConstructor *con = su->m_Constructor;
+    con->SetBase(base);
+
+    // Порядок важен: броня обнуляет оружие, поэтому оружие ставится последним.
+    con->OperateUnit(MRT_CHASSIS, (ERobotUnitKind)c.m_Param[0]);
+    con->OperateUnit(MRT_ARMOR, (ERobotUnitKind)c.m_Param[1]);
+    con->OperateUnit(MRT_HEAD, (ERobotUnitKind)c.m_Param[2]);
+    for (int i = 0; i < MAX_WEAPON_CNT; ++i) {
+        if (c.m_Param[3 + i])
+            con->OperateUnit(MRT_WEAPON, (ERobotUnitKind)c.m_Param[3 + i]);
+    }
+
+    int price[MAX_RESOURCES];
+    ZeroMemory(price, sizeof(price));
+    con->GetConstructionPrice(price);
+
+    const int count = c.m_Param[8] > 0 ? c.m_Param[8] : 1;
 
     for (int n = 0; n < count; ++n) {
         if (base->m_BS.GetItemsCnt() >= 6)
             break;
         if (su->GetRobotsCnt() + su->GetRobotsInStack() >= su->GetMaxSideRobots())
             break;
-        if (!su->IsEnoughResources(bot.m_Resources))
+        if (!su->IsEnoughResources(price))
             break;
 
         for (int r = 0; r < MAX_RESOURCES; ++r)
-            su->AddResourceAmount(ERes(r), -bot.m_Resources[r]);
+            su->AddResourceAmount(ERes(r), -price[r]);
 
-        su->m_Constructor->SetBase(base);
-        su->m_Constructor->BuildSpecialBot(bot);
+        con->StackRobot(NULL, 0);
     }
 }
 

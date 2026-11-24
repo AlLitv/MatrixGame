@@ -14,6 +14,7 @@
 #include "CIFaceMenu.h"
 #include "CHistory.h"
 #include "../Effects/MatrixEffectWeapon.hpp"
+#include "../CmdQueue.hpp"
 
 CConstructor::CConstructor() {
     m_ViewPosX = 0;
@@ -200,9 +201,9 @@ void CConstructor::StackRobot(void *pObject, int team) {
 
         // robot sozdan
 
-        //#ifdef _DEBUG
-        //        RESETFLAG(g_Flags, SETBIT(22));
-        //#endif
+        // #ifdef _DEBUG
+        //         RESETFLAG(g_Flags, SETBIT(22));
+        // #endif
 
         m_Build->RNeed(MR_Graph);
 
@@ -230,16 +231,21 @@ void __stdcall CConstructor::RemoteBuild(void *pObj) {
     int cfg_num = player_side->m_ConstructPanel->m_CurrentConfig;
     g_ConfigHistory->AddConfig(&player_side->m_ConstructPanel->m_Configs[cfg_num]);
 
-    for (int i = 0; i < g_IFaceList->m_RCountControl->GetCounter(); i++) {
-        StackRobot(pObj);
-    }
-
-    int res[MAX_RESOURCES];
-    GetConstructionPrice(res);
-    player_side->AddResourceAmount(TITAN, -res[TITAN] * g_IFaceList->m_RCountControl->GetCounter());
-    player_side->AddResourceAmount(ELECTRONICS, -res[ELECTRONICS] * g_IFaceList->m_RCountControl->GetCounter());
-    player_side->AddResourceAmount(ENERGY, -res[ENERGY] * g_IFaceList->m_RCountControl->GetCounter());
-    player_side->AddResourceAmount(PLASMA, -res[PLASMA] * g_IFaceList->m_RCountControl->GetCounter());
+    // Постройка больше не выполняется здесь: она уходит командой и применится на
+    // такте N + лаг, одинаково на обеих машинах. Иначе в сетевой игре робот
+    // появлялся бы только у того, кто нажал кнопку.
+    SCommand cmd;
+    ZeroMemory(&cmd, sizeof(cmd));
+    cmd.m_Type = CMD_BUILD_ROBOT;
+    cmd.m_Side = m_Side;
+    cmd.m_ObjId = m_Base ? (int)m_Base->GetId() : -1;
+    cmd.m_Param[0] = (int)m_Chassis.m_nKind;
+    cmd.m_Param[1] = (int)m_Armor.m_Unit.m_nKind;
+    cmd.m_Param[2] = (int)m_Head.m_nKind;
+    for (int i = 0; i < MAX_WEAPON_CNT; ++i)
+        cmd.m_Param[3 + i] = (int)m_Weapon[i].m_Unit.m_nKind;
+    cmd.m_Param[8] = g_IFaceList->m_RCountControl->GetCounter() > 0 ? g_IFaceList->m_RCountControl->GetCounter() : 1;
+    CmdIssue(cmd);
 
     if (player_side && player_side->m_ConstructPanel) {
         player_side->m_ConstructPanel->ResetGroupNClose();
@@ -575,7 +581,7 @@ void CConstructor::SuperDjeans(ERobotUnitType type, ERobotUnitKind kind, int pil
     else if (type == MRT_ARMOR) {
         //
         if (old_cfg) {
-            //восстанавливаем обычные ружбайки
+            // восстанавливаем обычные ружбайки
             int pilon = 0;
             for (int i = 0; i < MAX_WEAPON_CNT && pilon < m_Armor.m_MaxCommonWeaponCnt; i++) {
                 if (old_cfg->m_Weapon[i].m_nKind && !(old_cfg->m_Weapon[i].m_nKind == RUK_WEAPON_BOMB ||
@@ -588,7 +594,7 @@ void CConstructor::SuperDjeans(ERobotUnitType type, ERobotUnitKind kind, int pil
                         SuperDjeans(MRT_WEAPON, ERobotUnitKind(0), i);
                 }
             }
-            //восстанавливаем супер оружие
+            // восстанавливаем супер оружие
             if (m_Armor.m_MaxExtraWeaponCnt) {
                 for (int i = 0; i < MAX_WEAPON_CNT; i++) {
                     if ((old_cfg->m_Weapon[i].m_nKind == RUK_WEAPON_BOMB ||
