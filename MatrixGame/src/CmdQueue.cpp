@@ -18,6 +18,7 @@
 #include "RndSplit.hpp"
 #include "Logic/MatrixAIGroup.h"
 #include "Logic/MatrixRoadNetwork.hpp"
+#include "Interface/CConstructor.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -56,6 +57,8 @@ const char *CmdTypeName(int t) {
             return "AUTOATK";
         case CMD_AUTO_DEFENCE:
             return "AUTODEF";
+        case CMD_BUILD_ROBOT:
+            return "BUILD";
     }
     return "NONE";
 }
@@ -132,6 +135,10 @@ void CmdLogCommand(const SCommand &c, bool remote = false) {
     for (int i = 0; i < c.m_SelCnt; ++i)
         fprintf(g_Log, "%s%d", i ? "," : "", c.m_Sel[i]);
     fprintf(g_Log, " seq=%u", c.m_Seq);
+    if (c.m_Type == CMD_BUILD_ROBOT) {
+        for (int i = 0; i < CMD_PARAM_CNT; ++i)
+            fprintf(g_Log, " p%d=%d", i, c.m_Param[i]);
+    }
     if (remote)
         fprintf(g_Log, " net=1");
     fprintf(g_Log, "\n");
@@ -167,6 +174,8 @@ bool CmdParseLine(char *line, SCommand &c) {
             c.m_Flags = atoi(val);
         else if (strcmp(key, "seq") == 0)
             c.m_Seq = (unsigned)atoi(val);
+        else if (key[0] == 'p' && key[1] >= '0' && key[1] < '0' + CMD_PARAM_CNT && key[2] == 0)
+            c.m_Param[key[1] - '0'] = atoi(val);
         else if (strcmp(key, "sel") == 0) {
             int n = 0;
             for (const char *p = val; *p && n < CMD_SEL_MAX;) {
@@ -258,6 +267,53 @@ void CmdBreakOrders(const SCommand &c) {
     }
 }
 
+// Постройка робота. Идёт через тот же конструктор, что и у ИИ, и по той же
+// таблице типов (она грузится из данных игры, поэтому одинакова на всех
+// машинах), но с проверкой ресурсов и лимита — как у человека в интерфейсе.
+void CmdApplyBuild(CMatrixSideUnit *su, const SCommand &c) {
+    if (!SSpecialBot::m_AIRobotTypeList || SSpecialBot::m_AIRobotTypeCnt <= 0)
+        return;
+
+    const int idx = c.m_Param[0];
+    if (idx < 0 || idx >= SSpecialBot::m_AIRobotTypeCnt)
+        return;
+
+    CMatrixBuilding *base = NULL;
+    if (c.m_ObjId >= 0) {
+        CMatrixMapStatic *o = CmdFindObject(c.m_ObjId);
+        if (o && o->IsLiveBuilding() && o->AsBuilding()->IsBase() && o->GetSide() == su->m_Id)
+            base = o->AsBuilding();
+    }
+    if (!base) {
+        for (CMatrixMapStatic *o = CMatrixMapStatic::GetFirstLogic(); o; o = o->GetNextLogic()) {
+            if (o->IsLiveBuilding() && o->GetSide() == su->m_Id && o->IsBase()) {
+                base = o->AsBuilding();
+                break;
+            }
+        }
+    }
+    if (!base)
+        return;
+
+    const SSpecialBot &bot = SSpecialBot::m_AIRobotTypeList[idx];
+    int count = c.m_Param[1] > 0 ? c.m_Param[1] : 1;
+
+    for (int n = 0; n < count; ++n) {
+        if (base->m_BS.GetItemsCnt() >= 6)
+            break;
+        if (su->GetRobotsCnt() + su->GetRobotsInStack() >= su->GetMaxSideRobots())
+            break;
+        if (!su->IsEnoughResources(bot.m_Resources))
+            break;
+
+        for (int r = 0; r < MAX_RESOURCES; ++r)
+            su->AddResourceAmount(ERes(r), -bot.m_Resources[r]);
+
+        su->m_Constructor->SetBase(base);
+        su->m_Constructor->BuildSpecialBot(bot);
+    }
+}
+
 void CmdApply(const SCommand &c) {
     if (!g_MatrixMap)
         return;
@@ -265,6 +321,11 @@ void CmdApply(const SCommand &c) {
     CMatrixSideUnit *su = CmdFindSide(c.m_Side);
     if (!su || su->GetStatus() == SS_NONE)
         return;
+
+    if (c.m_Type == CMD_BUILD_ROBOT) {
+        CmdApplyBuild(su, c);
+        return;
+    }
 
     int no = CmdAssignGroup(su, c);
     if (no < 0)

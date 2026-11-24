@@ -37,6 +37,7 @@ enum ECommandType {
     CMD_AUTO_CAPTURE,
     CMD_AUTO_ATTACK,
     CMD_AUTO_DEFENCE,
+    CMD_BUILD_ROBOT,  // построить робота на базе: m_Param[0] — тип, m_Param[1] — сколько
 
     CMD_TYPE_MAX
 };
@@ -50,6 +51,9 @@ enum ECommandFlags {
 // MAX_ROBOTS == 60, больше роботов в выделении быть не может.
 #define CMD_SEL_MAX 64
 
+// Небольшой набор целых параметров под тип команды (постройка робота и т.п.).
+#define CMD_PARAM_CNT 4
+
 // Стороны нумеруются маленькими id (0 — нейтрал, 1 — игрок).
 #define CMD_SIDE_MAX 16
 
@@ -60,6 +64,7 @@ struct SCommand {
     int m_ObjId;   // id объекта-цели, -1 — цели нет
     int m_X, m_Y;  // точка приказа в клетках карты (CPoint)
     int m_Flags;   // ECommandFlags
+    int m_Param[CMD_PARAM_CNT];
     int m_SelCnt;  // сколько роботов в выделении
     int m_Sel[CMD_SEL_MAX];
     unsigned m_Seq;

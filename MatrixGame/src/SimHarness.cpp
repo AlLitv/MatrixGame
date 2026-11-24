@@ -808,49 +808,15 @@ static bool CmdBotAll(void) {
     return v != 0;
 }
 
-// Ставит одного робота в очередь сборки базы. Это тот же путь, которым строит
-// ИИ (CMatrixSideUnit::BuildRobot) и человек (кнопка в конструкторе), только без
-// списания ресурсов: для проверки слоя команд важна не экономика, а то, что
-// приказы армии идут через лог.
-static void BotBuildRobot(CMatrixSideUnit *ps) {
-    CMatrixBuilding *base = NULL;
-    for (CMatrixMapStatic *obj = CMatrixMapStatic::GetFirstLogic(); obj; obj = obj->GetNextLogic()) {
-        if (obj->IsLiveBuilding() && obj->GetSide() == ps->m_Id && obj->IsBase()) {
-            base = obj->AsBuilding();
-            break;
-        }
-    }
-    if (!base || base->m_BS.GetItemsCnt() >= 6)
-        return;
-
-    ps->m_Constructor->SetBase(base);
-    ps->m_Constructor->BuildSpecialBot(SSpecialBot::m_AIRobotTypeList[0]);
-}
-
 void SimCommandBotTick(int tick) {
     const int period = CmdBotPeriod();
 
     if (period <= 0 || tick <= 0 || !g_MatrixMap)
         return;
 
-    // Экономика сторон, за которые играют люди, пока остаётся за старым
-    // ИИ-стройщиком: армией командует скрипт, но роботов по-прежнему строит база.
-    // Строительство как команда — следующий шаг фазы 2 (docs/NETPLAY_PLAN.md §5).
-    // Период фиксирован, поэтому прогон по логу делает ровно те же вызовы.
-    if ((tick % 25) == 0 && SSpecialBot::m_AIRobotTypeList && SSpecialBot::m_AIRobotTypeCnt > 0) {
-        for (int i = 0; i < g_MatrixMap->m_SideCnt; ++i) {
-            CMatrixSideUnit *s = &g_MatrixMap->m_Side[i];
-            if (s->m_HumanSide && s->GetStatus() != SS_NONE)
-                BotBuildRobot(s);
-        }
-    }
-
-    if (CmdReplayMode() || (tick % period) != 0)
-        return;
-
     // Кем командует бот: в сети — только своей стороной (за остальные играет
     // партнёр), офлайн с MATRIXGAME_CMDBOT_ALL — всеми «людьми» сразу, иначе
-    // только стороной игрока. OFFLINE-эталон для сетевого теста снимается
+    // только стороной игрока. Офлайн-эталон для сетевого теста снимается
     // именно вторым режимом: в логе оказываются приказы обеих сторон.
     int sideIdx[CMD_SIDE_MAX];
     int sideCnt = 0;
@@ -865,6 +831,28 @@ void SimCommandBotTick(int tick) {
         if (take)
             sideIdx[sideCnt++] = i;
     }
+
+    if (CmdReplayMode() || sideCnt <= 0)
+        return;
+
+    // Постройка роботов тоже идёт приказом: раньше её делал харнесс напрямую
+    // мимо очереди, и в сети это был бы единственный оставшийся рассинхрон.
+    if (SSpecialBot::m_AIRobotTypeCnt > 0 && (tick % 25) == 0) {
+        const int typeIdx = (tick / 25) % SSpecialBot::m_AIRobotTypeCnt;
+        for (int sidx = 0; sidx < sideCnt; ++sidx) {
+            SCommand cmd;
+            ZeroMemory(&cmd, sizeof(cmd));
+            cmd.m_Type = CMD_BUILD_ROBOT;
+            cmd.m_Side = g_MatrixMap->m_Side[sideIdx[sidx]].m_Id;
+            cmd.m_ObjId = -1;  // базу выберет применение: своя живая база стороны
+            cmd.m_Param[0] = typeIdx;
+            cmd.m_Param[1] = 1;
+            CmdIssue(cmd);
+        }
+    }
+
+    if ((tick % period) != 0)
+        return;
 
     const int k = tick / period;
 

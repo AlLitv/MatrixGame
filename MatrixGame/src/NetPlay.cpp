@@ -249,7 +249,7 @@ void FlushCommands(void) {
     for (size_t i = 0; i < g_PendingCmds.size(); ++i) {
         const SCommand &c = g_PendingCmds[i];
 
-        if (!b.Room(28 + c.m_SelCnt * 4))
+        if (!b.Room(28 + CMD_PARAM_CNT * 4 + c.m_SelCnt * 4))
             break;  // остальное уйдёт следующей пачкой
 
         b.U16((unsigned)c.m_Type);
@@ -261,6 +261,8 @@ void FlushCommands(void) {
         b.I32(c.m_X);
         b.I32(c.m_Y);
         b.U32(c.m_Seq);
+        for (int k = 0; k < CMD_PARAM_CNT; ++k)
+            b.I32(c.m_Param[k]);
         for (int k = 0; k < c.m_SelCnt; ++k)
             b.U32((unsigned)c.m_Sel[k]);
 
@@ -475,7 +477,7 @@ void HandleCmd(SReader &r) {
     }
 
     for (unsigned i = 0; i < cnt; ++i) {
-        if (!r.Has(28))
+        if (!r.Has(28 + CMD_PARAM_CNT * 4))
             break;
 
         SCommand c;
@@ -489,6 +491,8 @@ void HandleCmd(SReader &r) {
         c.m_X = r.I32();
         c.m_Y = r.I32();
         c.m_Seq = r.U32();
+        for (int k = 0; k < CMD_PARAM_CNT; ++k)
+            c.m_Param[k] = r.I32();
 
         if (c.m_SelCnt < 0)
             c.m_SelCnt = 0;

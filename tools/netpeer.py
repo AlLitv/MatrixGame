@@ -44,7 +44,7 @@ HASH = 6
 
 HDR = struct.Struct('<IHHI')
 CMD_HEAD = struct.Struct('<II')
-CMD_FIXED = struct.Struct('<HHHHIiiiI')
+CMD_FIXED = struct.Struct('<HHHHIiiiIiiii')  # + 4 int params (build robot etc.)
 
 TYPES = {
     'STOP': 1,
@@ -57,6 +57,7 @@ TYPES = {
     'AUTOCAP': 8,
     'AUTOATK': 9,
     'AUTODEF': 10,
+    'BUILD': 11,
 }
 
 TICK_MS = 10
@@ -76,6 +77,7 @@ def parse_cmdlog(path):
                     k, v = token.split('=', 1)
                     kv[k] = v
             sel = [int(x) for x in kv.get('sel', '').split(',') if x]
+            params = [int(kv.get('p%d' % i, 0)) for i in range(4)]
             cmds.append({
                 'tick': int(kv.get('t', 0)),
                 'side': int(kv.get('side', 0)),
@@ -86,6 +88,7 @@ def parse_cmdlog(path):
                 'flags': int(kv.get('flags', 0)),
                 'seq': int(kv.get('seq', 0)),
                 'sel': sel,
+                'p': params,
             })
     cmds.sort(key=lambda c: (c['tick'], c['seq']))
     return cmds
@@ -109,8 +112,11 @@ def parse_ref(path):
 
 def pack_cmd(c):
     sel = c['sel'][:64]
+    params = (c.get('p') or [0, 0, 0, 0])[:4]
+    while len(params) < 4:
+        params.append(0)
     body = CMD_FIXED.pack(c['type'], c['flags'], c['side'], len(sel), c['tick'], c['obj'], c['x'], c['y'],
-                          c['seq'])
+                          c['seq'], *params)
     body += b''.join(struct.pack('<I', s) for s in sel)
     return body
 
@@ -120,7 +126,7 @@ def parse_cmd_batch(body):
     pos = CMD_HEAD.size
     out = []
     for _ in range(cnt):
-        ctype, flags, side, selcnt, tick, obj, x, y, seq = CMD_FIXED.unpack_from(body, pos)
+        ctype, flags, side, selcnt, tick, obj, x, y, seq, p0, p1, p2, p3 = CMD_FIXED.unpack_from(body, pos)
         pos += CMD_FIXED.size
         sel = list(struct.unpack_from('<%dI' % selcnt, body, pos)) if selcnt else []
         pos += selcnt * 4
@@ -134,11 +140,12 @@ def parse_cmd_batch(body):
             'flags': flags,
             'seq': seq,
             'sel': list(sel),
+            'p': [p0, p1, p2, p3],
         })
     return batch, out
 
 
-CMP_FIELDS = ('tick', 'side', 'type', 'obj', 'x', 'y', 'flags', 'sel')
+CMP_FIELDS = ('tick', 'side', 'type', 'obj', 'x', 'y', 'flags', 'sel', 'p')
 
 
 class Peer(object):
