@@ -183,10 +183,19 @@ void protectedBlock1(CFormMatrixGame *formgame) {
 
         L3GRun();
     }
+#ifdef MATRIXGAME_SIM_HARNESS
+    // Игра глушит здесь исключение и просто выходит: без записи в трассу это
+    // выглядит как «бой закончился сам».
+    __except (SimExceptionFilter(GetExceptionInformation()), EXCEPTION_EXECUTE_HANDLER) {
+        SETFLAG(g_Flags, GFLAG_EXITLOOP);
+        g_ExitState += 100;
+    }
+#else
     __except (EXCEPTION_EXECUTE_HANDLER /*ExceptionHandler(GetExceptionInformation())*/) {
         SETFLAG(g_Flags, GFLAG_EXITLOOP);
         g_ExitState += 100;
     }
+#endif
 }
 
 void protectedBlock2(CFormMatrixGame *formgame, SRobotGameState *rgs) {

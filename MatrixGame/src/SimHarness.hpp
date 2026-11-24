@@ -50,6 +50,11 @@ void SimTrace(const char *message);
 // Фильтр исключений: пишет адрес падения в MATRIXGAME_TRACE.
 void SimInstallCrashFilter(void);
 
+// Фильтр для __except внутри MatrixGameDll: игра глушит исключения в
+// protectedBlock1 и выходит молча, поэтому без этой записи падение выглядит как
+// «бой просто закончился». Возвращает EXCEPTION_EXECUTE_HANDLER.
+int SimExceptionFilter(void *exceptionPointers);
+
 // Принудительная карта из MATRIXGAME_MAP (иначе NULL — берём выбор игры).
 const wchar *SimMapOverride(void);
 

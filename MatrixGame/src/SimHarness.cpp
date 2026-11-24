@@ -525,6 +525,22 @@ void SimInstallCrashFilter(void) {
     SetUnhandledExceptionFilter(SimCrashFilter);
 }
 
+int SimExceptionFilter(void *exceptionPointers) {
+    EXCEPTION_POINTERS *ep = (EXCEPTION_POINTERS *)exceptionPointers;
+    char buf[192];
+    if (ep && ep->ExceptionRecord) {
+        _snprintf(buf, sizeof(buf), "EXCEPTION code=0x%08x addr=0x%p module=0x%llx",
+                  (unsigned)ep->ExceptionRecord->ExceptionCode, (void *)ep->ExceptionRecord->ExceptionAddress,
+                  ModuleOffset((void *)ep->ExceptionRecord->ExceptionAddress));
+    }
+    else {
+        _snprintf(buf, sizeof(buf), "EXCEPTION without a record");
+    }
+    buf[sizeof(buf) - 1] = 0;
+    SimTrace(buf);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
 void SimTrace(const char *message) {
     const wchar_t *path = EnvStr(L"MATRIXGAME_TRACE");
     if (!path)
@@ -696,10 +712,11 @@ void SimLogTakt(int step) {
                 if (g_MatrixMap->m_Side[i].GetStatus() == SS_ACTIVE)
                     ++active;
             }
-            fprintf(log, "t=%d objects=%d rand=%llu logic=%llu hash=%016llx rep=%d/%d/%d pst=%d act=%d\n",
+            fprintf(log, "t=%d objects=%d rand=%llu logic=%llu hash=%016llx rep=%d/%d/%d pst=%d act=%d bwd=%d xl=%d\n",
                     time, objects, SimRandCalls(), SimLogicRandCalls(), hash, g_repairStats[SIMREP_ALLOC],
                     g_repairStats[SIMREP_ENTER], g_repairStats[SIMREP_PASS],
-                    (int)g_MatrixMap->GetPlayerSide()->GetStatus(), active);
+                    (int)g_MatrixMap->GetPlayerSide()->GetStatus(), active, g_MatrixMap->GetBeforeWinLooseCount(),
+                    FLAG(g_Flags, GFLAG_EXITLOOP) ? 1 : 0);
             g_repairStats[SIMREP_ALLOC] = g_repairStats[SIMREP_ENTER] = g_repairStats[SIMREP_PASS] = 0;
             fflush(log);
         }

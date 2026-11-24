@@ -563,6 +563,11 @@ public:
 
     CMatrixSideUnit *GetSideById(int id);
     CMatrixSideUnit *GetPlayerSide(void) { return m_PlayerSide; };
+#ifdef MATRIXGAME_SIM_HARNESS
+    // Счётчик тактов до выхода из боя: по нему видно, решила ли логика, что бой
+    // закончен, или игру закрыл кто-то снаружи.
+    int GetBeforeWinLooseCount(void) const { return m_BeforeWinLooseDialogCount; }
+#endif
 
     void WaterClear(void);
     void WaterInit(void);
