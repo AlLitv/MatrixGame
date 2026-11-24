@@ -7,6 +7,7 @@
 
 #include "SimHarness.hpp"
 #include "CmdQueue.hpp"
+#include "NetPlay.hpp"
 #include "MatrixLogic.hpp"
 #include "MatrixObject.hpp"
 #include "MatrixObjectBuilding.hpp"
@@ -2933,6 +2934,15 @@ void CMatrixMapLogic::Takt(int step) {
             m_PauseHint->Release();
             m_PauseHint = NULL;
         }
+    }
+
+    // Сеть: такт не начинается, пока партнёр не подтвердил (READY), что отправил
+    // все свои приказы до него. Мир замирает, кадры продолжают идти — иначе из
+    // заморозки не выйти: пакеты принимаются только из кадра.
+    if (NetIsActive()) {
+        NetPump();
+        if (!NetCanAdvance(m_TaktNext / LOGIC_TAKT_PERIOD + 1))
+            return;
     }
 
     m_Time += step;

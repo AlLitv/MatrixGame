@@ -28,6 +28,7 @@
 #include "MatrixInstantDraw.hpp"
 #include "MatrixSampleStateManager.hpp"
 #include "CmdQueue.hpp"
+#include "NetPlay.hpp"
 
 #include <stdio.h>
 #include <time.h>
@@ -496,6 +497,9 @@ void MatrixGameInit(HINSTANCE inst, HWND wnd, wchar *map, SRobotsSettings *set, 
     // загружена (имя карты и сид идут в шапку).
     CmdInit();
 
+    // Сетевой слой (фаза 3): сокет, рукопожатие. Без MATRIXGAME_NET инертен.
+    NetInit();
+
     g_MatrixMap->CalcCannonPlace();
     SSpecialBot::LoadAIRobotType(*g_MatrixData->BlockGet(L"AIRobotType"));
 
@@ -775,6 +779,7 @@ void SRobotsSettings::ApplyVideoParams(void) {
 void MatrixGameDeinit(void) {
     DTRACE();
 
+    NetShutdown();
     CmdShutdown();
 
     SSpecialBot::ClearAIRobotType();

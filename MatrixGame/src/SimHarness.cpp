@@ -14,6 +14,7 @@
 #include "MatrixRobot.hpp"
 #include "MatrixSide.hpp"
 #include "CmdQueue.hpp"
+#include "NetPlay.hpp"
 #include "Interface/CConstructor.h"
 
 #include <stdio.h>
@@ -830,7 +831,11 @@ void SimCommandBotTick(int tick) {
     if ((tick % 25) == 0 && SSpecialBot::m_AIRobotTypeList && SSpecialBot::m_AIRobotTypeCnt > 0)
         BotBuildRobot(ps);
 
+    // В сетевом режиме сторона игрока может принадлежать партнёру — тогда свои
+    // приказы не генерируем, они придут из сети.
     if (CmdReplayMode() || (tick % period) != 0)
+        return;
+    if (NetIsActive() && NetRemoteSide() == ps->m_Id)
         return;
 
     SCommand cmd;

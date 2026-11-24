@@ -7,6 +7,7 @@
 
 #include "SimHarness.hpp"
 #include "CmdQueue.hpp"
+#include "NetPlay.hpp"
 #include "MatrixMap.hpp"
 #include "MatrixLogic.hpp"
 #include "MatrixSide.hpp"
@@ -29,7 +30,7 @@ std::vector<SCommand> g_Queue;
 FILE *g_Log = NULL;
 bool g_Replay = false;
 bool g_InitDone = false;
-unsigned g_Seq = 0;
+unsigned g_SideSeq[CMD_SIDE_MAX] = {0};
 int g_IssuedCnt = 0;
 int g_AppliedCnt = 0;
 
@@ -122,7 +123,7 @@ void CmdLogHeader(void) {
     fflush(g_Log);
 }
 
-void CmdLogCommand(const SCommand &c) {
+void CmdLogCommand(const SCommand &c, bool remote = false) {
     if (!g_Log)
         return;
 
@@ -130,7 +131,10 @@ void CmdLogCommand(const SCommand &c) {
             CmdTypeName(c.m_Type), c.m_ObjId, c.m_X, c.m_Y, c.m_Flags, c.m_SelCnt);
     for (int i = 0; i < c.m_SelCnt; ++i)
         fprintf(g_Log, "%s%d", i ? "," : "", c.m_Sel[i]);
-    fprintf(g_Log, " seq=%u\n", c.m_Seq);
+    fprintf(g_Log, " seq=%u", c.m_Seq);
+    if (remote)
+        fprintf(g_Log, " net=1");
+    fprintf(g_Log, "\n");
     fflush(g_Log);
 }
 
@@ -374,10 +378,12 @@ void CmdLoadReplay(const wchar_t *path) {
 
     std::sort(g_Queue.begin(), g_Queue.end(), CmdLess);
 
-    g_Seq = 0;
+    for (int s = 0; s < CMD_SIDE_MAX; ++s)
+        g_SideSeq[s] = 0;
     for (size_t i = 0; i < g_Queue.size(); ++i) {
-        if (g_Queue[i].m_Seq > g_Seq)
-            g_Seq = g_Queue[i].m_Seq;
+        const int s = g_Queue[i].m_Side;
+        if (s >= 0 && s < CMD_SIDE_MAX && g_Queue[i].m_Seq > g_SideSeq[s])
+            g_SideSeq[s] = g_Queue[i].m_Seq;
     }
 
     g_Replay = true;
@@ -396,7 +402,8 @@ void CmdInit(void) {
     g_InitDone = true;
 
     g_Queue.clear();
-    g_Seq = 0;
+    for (int s = 0; s < CMD_SIDE_MAX; ++s)
+        g_SideSeq[s] = 0;
     g_IssuedCnt = 0;
     g_AppliedCnt = 0;
 
@@ -434,7 +441,8 @@ void CmdShutdown(void) {
     }
 
     g_Queue.clear();
-    g_Seq = 0;
+    for (int s = 0; s < CMD_SIDE_MAX; ++s)
+        g_SideSeq[s] = 0;
     g_Replay = false;
     g_InitDone = false;
 }
@@ -450,7 +458,15 @@ void CmdIssue(SCommand &cmd) {
     if (cmd.m_Tick <= 0)
         cmd.m_Tick = CmdCurrentTick() + CMD_INPUT_LAG_TICKS;
 
-    cmd.m_Seq = ++g_Seq;
+    // Номер сквозной внутри стороны: порядок применения задаётся парой
+    // (такт, сторона, номер), поэтому нумерация каждой стороны независима и
+    // совпадает на обеих машинах.
+    if (cmd.m_Side < 0)
+        cmd.m_Side = 0;
+    if (cmd.m_Side >= CMD_SIDE_MAX)
+        cmd.m_Side = CMD_SIDE_MAX - 1;
+    cmd.m_Seq = ++g_SideSeq[cmd.m_Side];
+
     if (cmd.m_SelCnt < 0)
         cmd.m_SelCnt = 0;
     if (cmd.m_SelCnt > CMD_SEL_MAX)
@@ -460,6 +476,31 @@ void CmdIssue(SCommand &cmd) {
     ++g_IssuedCnt;
 
     CmdLogCommand(cmd);
+
+    // В сетевом режиме свой приказ уходит партнёру: у него он попадёт в очередь
+    // с тем же тактом и тем же номером, а применится тем же CmdApply.
+    NetSendCommand(cmd);
+}
+
+void CmdIssueRemote(SCommand &cmd) {
+    if (!g_InitDone || !g_MatrixMap)
+        return;
+    if (cmd.m_Side < 0 || cmd.m_Side >= CMD_SIDE_MAX)
+        return;
+    if (cmd.m_Tick <= 0)
+        return;
+    if (cmd.m_SelCnt < 0)
+        cmd.m_SelCnt = 0;
+    if (cmd.m_SelCnt > CMD_SEL_MAX)
+        cmd.m_SelCnt = CMD_SEL_MAX;
+
+    // Пакеты UDP могут прийти не по порядку (перепосылка после потери), поэтому
+    // очередь не обязана быть отсортированной: CmdTick выбирает всё, что созрело,
+    // и сортирует выбранное.
+    g_Queue.push_back(cmd);
+    ++g_IssuedCnt;
+
+    CmdLogCommand(cmd, true);
 }
 
 void CmdTick(int tick) {
@@ -472,24 +513,32 @@ void CmdTick(int tick) {
     SimCommandBotTick(tick);
 #endif
 
-    if (g_Queue.empty())
-        return;
+    NetPump();
 
-    size_t dueEnd = 0;
-    while (dueEnd < g_Queue.size() && g_Queue[dueEnd].m_Tick <= tick)
-        ++dueEnd;
-    if (dueEnd == 0)
-        return;
-
-    std::vector<SCommand> due(g_Queue.begin(), g_Queue.begin() + (std::vector<SCommand>::difference_type)dueEnd);
-    g_Queue.erase(g_Queue.begin(), g_Queue.begin() + (std::vector<SCommand>::difference_type)dueEnd);
-
-    std::sort(due.begin(), due.end(), CmdLess);
-
-    for (size_t i = 0; i < due.size(); ++i) {
-        CmdApply(due[i]);
-        ++g_AppliedCnt;
+    // Забираем всё, чей такт уже наступил. Очередь может быть не отсортирована
+    // (приказы из сети приходят в порядке доставки, а не по тактам), поэтому
+    // просматриваем её целиком и сортируем только созревшие.
+    std::vector<SCommand> due;
+    size_t keep = 0;
+    for (size_t i = 0; i < g_Queue.size(); ++i) {
+        if (g_Queue[i].m_Tick <= tick)
+            due.push_back(g_Queue[i]);
+        else
+            g_Queue[keep++] = g_Queue[i];
     }
+    g_Queue.resize(keep);
+
+    if (!due.empty()) {
+        std::sort(due.begin(), due.end(), CmdLess);
+
+        for (size_t i = 0; i < due.size(); ++i) {
+            CmdApply(due[i]);
+            ++g_AppliedCnt;
+        }
+    }
+
+    // Мир досчитан до этого такта: партнёру уходит ACK и, если пора, хеш.
+    NetOnTickApplied(tick);
 }
 
 int CmdCurrentTick(void) {

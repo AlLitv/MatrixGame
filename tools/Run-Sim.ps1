@@ -44,6 +44,13 @@ param(
     [int]$CmdBot = 0,
     [string]$CmdLog = "",
     [string]$CmdReplay = "",
+    [switch]$Net,
+    [int]$NetPort = 27777,
+    [int]$NetLocalSide = 0,
+    [int]$NetHashPeriod = 50,
+    [int]$NetWaitMs = 60000,
+    [string]$NetLog = "",
+    [string]$NetHashLog = "",
     [bool]$AutoStart = $true,
     [switch]$NoDraw,
     [int]$TimeoutSec = 900
@@ -99,12 +106,38 @@ if ($cmdLogPath) { $env:MATRIXGAME_CMDLOG = $cmdLogPath } else { Remove-Item Env
 if ($CmdReplay) { $env:MATRIXGAME_CMDREPLAY = [System.IO.Path]::GetFullPath($CmdReplay) } else { Remove-Item Env:\MATRIXGAME_CMDREPLAY -ErrorAction SilentlyContinue }
 if ($CmdBot -gt 0) { $env:MATRIXGAME_CMDBOT = "$CmdBot" } else { Remove-Item Env:\MATRIXGAME_CMDBOT -ErrorAction SilentlyContinue }
 
+# Network layer (phase 3): UDP socket, command exchange with a peer, tick barrier,
+# world-hash comparison.
+$netLogPath = ""
+if ($Net) {
+    if ($NetLog) { $netLogPath = [System.IO.Path]::GetFullPath($NetLog) }
+    else { $netLogPath = Join-Path $logs "$Name-net.txt" }
+    $env:MATRIXGAME_NET = '1'
+    $env:MATRIXGAME_NET_PORT = "$NetPort"
+    $env:MATRIXGAME_NET_LOCAL_SIDE = "$NetLocalSide"
+    $env:MATRIXGAME_NET_HASH_PERIOD = "$NetHashPeriod"
+    $env:MATRIXGAME_NET_WAIT_MS = "$NetWaitMs"
+    $env:MATRIXGAME_NETLOG = $netLogPath
+}
+else {
+    Remove-Item Env:\MATRIXGAME_NET, Env:\MATRIXGAME_NET_PORT, Env:\MATRIXGAME_NET_LOCAL_SIDE, Env:\MATRIXGAME_NET_HASH_PERIOD, Env:\MATRIXGAME_NET_WAIT_MS, Env:\MATRIXGAME_NETLOG -ErrorAction SilentlyContinue
+}
+
+# The net world hash is written even without a socket, so an offline run gives the
+# reference sequence that a networked run is compared against.
+$netHashPath = ""
+if ($NetHashLog) { $netHashPath = [System.IO.Path]::GetFullPath($NetHashLog) }
+elseif ($Net) { $netHashPath = Join-Path $logs "$Name-nethash.txt" }
+if ($netHashPath) { $env:MATRIXGAME_NETHASHLOG = $netHashPath } else { Remove-Item Env:\MATRIXGAME_NETHASHLOG -ErrorAction SilentlyContinue }
+
 "run      : $Name"
 "map/seed : $Map / $Seed, step $(if ($Step -gt 0) { "$Step ms" } else { "measured (whole ticks)" }), max $Ticks ms, hash step $(if ($HashStep -gt 0) { $HashStep } else { 100 }) ms"
 "alloc fill: $(if ($Fill) { "0x$Fill" } else { '00 (default)' })$(if ($Poison -gt 0) { ", stack poison $Poison B" } else { '' })$(if ($RandLog) { ', rand log on' } else { '' })"
 "autostart: $(if ($AutoStart) { 'menu -> planetary battles -> START' } else { 'off' })$(if ($NoDraw) { ', no draw' } else { '' })"
 if ($CmdBot -gt 0) { "commands : bot every $CmdBot ticks -> $cmdLogPath" }
 if ($CmdReplay) { "commands : replay from $($env:MATRIXGAME_CMDREPLAY)" }
+if ($Net) { "net      : udp $NetPort, local side $NetLocalSide, log $netLogPath" }
+if ($netHashPath) { "nethash  : $netHashPath" }
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $proc = Start-Process -FilePath $exe -WorkingDirectory $GameDir -PassThru
@@ -188,4 +221,10 @@ if ($cmdLogPath -and (Test-Path $cmdLogPath)) {
     $cmdLines = Get-Content $cmdLogPath
     "cmd log  : $cmdLogPath ($($cmdLines.Count) lines)"
     $cmdLines | Select-Object -Last 2 | ForEach-Object { "  $_" }
+}
+
+if ($netLogPath -and (Test-Path $netLogPath)) {
+    $netLines = Get-Content $netLogPath
+    "net log  : $netLogPath ($($netLines.Count) lines)"
+    $netLines | Select-Object -Last 4 | ForEach-Object { "  $_" }
 }

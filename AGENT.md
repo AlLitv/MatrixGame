@@ -197,6 +197,14 @@ Environment switches:
 | `MATRIXGAME_CMDLOG` | write the command stream to this file (it doubles as a replay) |
 | `MATRIXGAME_CMDREPLAY` | load a command log and apply it instead of generating commands |
 | `MATRIXGAME_CMDBOT` | scripted player: issue an order for the player side every N ticks |
+| `MATRIXGAME_NET` | enable the UDP layer (phase 3) |
+| `MATRIXGAME_NET_PORT` / `MATRIXGAME_NET_BIND` | socket port and bind address; loopback by default |
+| `MATRIXGAME_NET_LOCAL_SIDE` | id of the side this process plays |
+| `MATRIXGAME_NET_HASH_PERIOD` | ticks between world-hash reports, default 50 |
+| `MATRIXGAME_NET_WAIT_MS` | how long to wait for the peer before falling back to an offline run |
+| `MATRIXGAME_NET_STOP_ON_DESYNC` | stop the match at the first hash mismatch |
+| `MATRIXGAME_NETLOG` | net log: handshake, READY progress, `DESYNC` lines |
+| `MATRIXGAME_NETHASHLOG` | net world hash per period; written without a socket too, which is what makes an offline run the reference |
 
 The differential technique: run the same battle twice with `MATRIXGAME_FILL=CD` and `MATRIXGAME_FILL=AA`. Anything the engine reads before writing it will differ between the two runs, so the first field that diverges is the uninitialised one. `tools/` has the whole loop:
 
@@ -231,6 +239,36 @@ python tools\simdiff.py tools\logs\p2a.txt tools\logs\p2c.txt
 Result (24.11.2026, 60 s of game time, 116 commands, 121 checkpoints): `armagedd`/12345 — two generation passes are identical (`6328608142b739b2`) and the replay of the first one is identical to both; the two command logs are byte-identical. `crossfire`/4242 — replay identical to generation (`eac52acc462d8868`).
 
 Still outside the stream (the next step of Phase 2): building robots and turrets (`CConstructorPanel`, `m_CurrentAction == BUILDING_TURRET`), flyer orders (`CMatrixFlyer::SetTarget` runs at frame time and consumes logic-RNG numbers there), entering/leaving a robot (arcade mode) and the multi-selection UI state.
+
+### Netplay layer (Phase 3)
+
+`MatrixGame/src/NetPlay.{hpp,cpp}` is a UDP layer with one socket per process, enabled by `MATRIXGAME_NET=1`; by default it binds `127.0.0.1:27777`, and `MATRIXGAME_NET_BIND` opens it to the network. The peer address is learnt from its `HELLO`, so nothing has to be configured on the host side. Messages: `HELLO`/`HELLO_ACK` (side and match seed, rejected on seed mismatch), `CMD` (a numbered batch of commands), `ACK` (contiguous prefix received + how far this side has simulated), `READY` (the highest tick for which the sender promises to have sent everything) and `HASH`.
+
+Three properties make it lockstep rather than state streaming:
+
+1. **Delivery.** A batch stays in the retransmit queue until the peer's contiguous `ACK` covers it, and is resent every 100 ms otherwise. Duplicate batches are dropped by number, and the `ACK` only confirms a contiguous prefix — otherwise a lost batch would be "confirmed" by the next one and its commands would silently vanish.
+2. **Tick barrier.** `CMatrixMapLogic::Takt` refuses to start tick `T` until `READY >= T` arrives, and `READY` is only sent once the peer has acknowledged every command up to that tick. Until the handshake completes the simulation stays at `t=0`; after `MATRIXGAME_NET_WAIT_MS` (60 s) it falls back to an offline run so a broken test does not hang.
+3. **Hash exchange.** Every `MATRIXGAME_NET_HASH_PERIOD` ticks (50 by default) a world hash (objects, positions, hit points, groups, game time) is sent; a mismatch is written to `MATRIXGAME_NETLOG` as `DESYNC tick=... our=... peer=...`, and `MATRIXGAME_NET_STOP_ON_DESYNC=1` ends the match there.
+
+Testing uses `tools/netpeer.py`, a Python peer that can play a side from a command log, only listen, drop every Nth batch, or send a deliberately wrong hash:
+
+```bat
+:: 1. offline reference: the same commands, no socket, and the net hash sequence
+tools\Run-Sim.ps1 -Name p3ref -Map armagedd -Seed 12345 -Ticks 60000 -HashStep 500 -NoDraw -CmdBot 50 ^
+                  -NetHashLog tools\logs\p3ref-net.txt
+
+:: 2. the peer plays side 1 from that command log
+python tools\netpeer.py --seed 12345 --side 1 --cmds tools\logs\p3ref-cmd.txt ^
+                        --ref tools\logs\p3ref-net.txt --pace ack --end-tick 6000
+
+:: 3. the game, which must reproduce the offline world bit for bit
+tools\Run-Sim.ps1 -Name p3net -Map armagedd -Seed 12345 -Ticks 60000 -HashStep 500 -NoDraw -CmdBot 50 -Net
+python tools\simdiff.py tools\logs\p3ref.txt tools\logs\p3net.txt
+```
+
+Verified (24.11.2026): 115 commands applied over UDP, 121 checkpoints identical to the offline run (`6328608142b739b2`), 120/120 net hashes matched. The reverse direction (the game plays, the peer only listens with `--echo --expect <the game's own cmd log>`) delivered 116/116 commands identical field by field. With `--drop-every 3` the peer loses 38 first transmissions, all are retransmitted, and both the world and all 120 hashes still match — that test also exposed a real bug: a late batch used to be queued out of order and its commands were applied on the wrong ticks (divergence at 5.5 s); `CmdTick` now scans the whole queue and sorts only what is due.
+
+Still open: a match between two simulations. Today the remote side is a script with no world of its own. Two real machines need (a) the local side to come from the lobby instead of always being the player side, and (b) a deterministic economy driver for both sides, because the AI build-up lives in `TaktHL` and is switched off together with `AUTOMATIC_MODE`. Reconnect (catch up by replaying commands from the last checkpoint) and link emulation with latency and jitter are also still to do.
 
 ## 9. Pre-commit checklist
 

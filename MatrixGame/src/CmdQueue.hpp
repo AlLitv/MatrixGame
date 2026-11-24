@@ -50,6 +50,9 @@ enum ECommandFlags {
 // MAX_ROBOTS == 60, больше роботов в выделении быть не может.
 #define CMD_SEL_MAX 64
 
+// Стороны нумеруются маленькими id (0 — нейтрал, 1 — игрок).
+#define CMD_SIDE_MAX 16
+
 struct SCommand {
     int m_Type;    // ECommandType
     int m_Side;    // id стороны (CMatrixSideUnit::m_Id)
@@ -82,6 +85,10 @@ bool CmdLogEnabled(void);
 // Кладёт команду в очередь. Если m_Tick <= 0, такт считается сам:
 // текущий + CMD_INPUT_LAG_TICKS; m_Seq тоже заполняется здесь.
 void CmdIssue(SCommand &cmd);
+
+// Команда от партнёра по сети: такт и номер пришли с той стороны, очередь
+// только держит её до нужного такта.
+void CmdIssueRemote(SCommand &cmd);
 
 // Собирает команду из текущего выделения стороны — замена
 // CMatrixSideUnit::SelGroupToLogicGroup() на стороне ввода (сам мир не трогает).
