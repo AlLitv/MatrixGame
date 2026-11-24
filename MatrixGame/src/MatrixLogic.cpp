@@ -6,6 +6,7 @@
 #include "stdafx.h"
 
 #include "SimHarness.hpp"
+#include "CmdQueue.hpp"
 #include "MatrixLogic.hpp"
 #include "MatrixObject.hpp"
 #include "MatrixObjectBuilding.hpp"
@@ -3013,6 +3014,10 @@ void CMatrixMapLogic::Takt(int step) {
     while (GetTime() > m_TaktNext) {
         m_TaktNext += LOGIC_TAKT_PERIOD;
         // CMatrixMapStatic::ProceedLogic(LOGIC_TAKT_PERIOD);
+
+        // Слой команд: приказы игроков применяются в начале такта, до логики
+        // сторон, поэтому порядок «приказ → его выполнение» одинаков у всех.
+        CmdTick(m_TaktNext / LOGIC_TAKT_PERIOD);
 
         for (int i = 0; i < m_SideCnt; i++) {
             m_Side[i].LogicTakt(LOGIC_TAKT_PERIOD);

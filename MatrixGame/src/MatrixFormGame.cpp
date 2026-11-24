@@ -1,4 +1,4 @@
-﻿// MatrixGame - SR2 Planetary battles engine
+// MatrixGame - SR2 Planetary battles engine
 // Copyright (C) 2012, Elemental Games, Katauri Interactive, CHK-Games
 // Licensed under GPLv2 or any later version
 // Refer to the LICENSE file included
@@ -12,6 +12,7 @@
 #include "MatrixFlyer.hpp"
 #include "Effects/MatrixEffect.hpp"
 #include "Interface/CInterface.h"
+#include "CmdQueue.hpp"
 #include "MatrixMultiSelection.hpp"
 #include "MatrixMapStatic.hpp"
 #include "Interface/CIFaceMenu.h"
@@ -1271,36 +1272,36 @@ void CFormMatrixGame::Keyboard(bool down, int scan) {
                         // a"U"to attack - Программа атаки.
                         if (FLAG(g_IFaceList->m_IfListFlags, AUTO_FROBOT_ON)) {
                             RESETFLAG(g_IFaceList->m_IfListFlags, AUTO_FROBOT_ON | AUTO_CAPTURE_ON | AUTO_PROTECT_ON);
-                            ps->PGOrderStop(ps->SelGroupToLogicGroup());
+                            CmdOrder(ps, CMD_STOP, CPoint(0, 0), NULL);
                         }
                         else {
                             RESETFLAG(g_IFaceList->m_IfListFlags, AUTO_FROBOT_ON | AUTO_CAPTURE_ON | AUTO_PROTECT_ON);
                             SETFLAG(g_IFaceList->m_IfListFlags, AUTO_FROBOT_ON);
-                            ps->PGOrderAutoAttack(ps->SelGroupToLogicGroup());
+                            CmdOrder(ps, CMD_AUTO_ATTACK, CPoint(0, 0), NULL);
                         }
                     }
                     else if (((GetAsyncKeyState(g_Config.m_KeyActions[KA_AUTOORDER_CAPTURE]) & 0x8000) == 0x8000)) {
                         //"C"apture - Программа захвата.
                         if (FLAG(g_IFaceList->m_IfListFlags, AUTO_CAPTURE_ON)) {
                             RESETFLAG(g_IFaceList->m_IfListFlags, AUTO_FROBOT_ON | AUTO_CAPTURE_ON | AUTO_PROTECT_ON);
-                            ps->PGOrderStop(ps->SelGroupToLogicGroup());
+                            CmdOrder(ps, CMD_STOP, CPoint(0, 0), NULL);
                         }
                         else {
                             RESETFLAG(g_IFaceList->m_IfListFlags, AUTO_FROBOT_ON | AUTO_CAPTURE_ON | AUTO_PROTECT_ON);
                             SETFLAG(g_IFaceList->m_IfListFlags, AUTO_CAPTURE_ON);
-                            ps->PGOrderAutoCapture(ps->SelGroupToLogicGroup());
+                            CmdOrder(ps, CMD_AUTO_CAPTURE, CPoint(0, 0), NULL);
                         }
                     }
                     else if (((GetAsyncKeyState(g_Config.m_KeyActions[KA_AUTOORDER_DEFEND]) & 0x8000) == 0x8000)) {
                         //"D"efender - Программа Охранять Protect
                         if (FLAG(g_IFaceList->m_IfListFlags, AUTO_PROTECT_ON)) {
                             RESETFLAG(g_IFaceList->m_IfListFlags, AUTO_FROBOT_ON | AUTO_CAPTURE_ON | AUTO_PROTECT_ON);
-                            ps->PGOrderStop(ps->SelGroupToLogicGroup());
+                            CmdOrder(ps, CMD_STOP, CPoint(0, 0), NULL);
                         }
                         else {
                             RESETFLAG(g_IFaceList->m_IfListFlags, AUTO_FROBOT_ON | AUTO_CAPTURE_ON | AUTO_PROTECT_ON);
                             SETFLAG(g_IFaceList->m_IfListFlags, AUTO_PROTECT_ON);
-                            ps->PGOrderAutoDefence(ps->SelGroupToLogicGroup());
+                            CmdOrder(ps, CMD_AUTO_DEFENCE, CPoint(0, 0), NULL);
                         }
                     }
                     else if (((GetAsyncKeyState(g_Config.m_KeyActions[KA_ORDER_MOVE]) & 0x8000) == 0x8000)) {
@@ -1310,8 +1311,7 @@ void CFormMatrixGame::Keyboard(bool down, int scan) {
                     }
                     else if (((GetAsyncKeyState(g_Config.m_KeyActions[KA_ORDER_STOP]) & 0x8000) == 0x8000)) {
                         //"S"top - Стоять
-                        ps->PGOrderStop(ps->SelGroupToLogicGroup());
-                        ps->SelectedGroupBreakOrders();
+                        CmdOrder(ps, CMD_STOP, CPoint(0, 0), NULL, true);
                     }
                     else if (((GetAsyncKeyState(g_Config.m_KeyActions[KA_ORDER_CAPTURE]) & 0x8000) == 0x8000)) {
                         // Ta"K"e - Захватить

@@ -12,6 +12,7 @@
 #include "../MatrixObjectBuilding.hpp"
 #include "../MatrixMinimap.hpp"
 #include "../MatrixGameDll.hpp"
+#include "../CmdQueue.hpp"
 #include "../MatrixFlyer.hpp"
 #include "../MatrixObjectCannon.hpp"
 #include "CAnimation.h"
@@ -3977,13 +3978,13 @@ void __stdcall CIFaceList::PlayerAction(void *object) {
     else if (element->m_strName == IF_AORDER_FROBOT_ON) {
         RESETFLAG(m_IfListFlags, AUTO_FROBOT_ON | AUTO_CAPTURE_ON | AUTO_PROTECT_ON);
 
-        ps->PGOrderStop(ps->SelGroupToLogicGroup());
+        CmdOrder(ps, CMD_STOP, CPoint(0, 0), NULL);
     }
     else if (element->m_strName == IF_AORDER_FROBOT_OFF) {
         RESETFLAG(m_IfListFlags, AUTO_FROBOT_ON | AUTO_CAPTURE_ON | AUTO_PROTECT_ON);
         SETFLAG(m_IfListFlags, AUTO_FROBOT_ON);
 
-        ps->PGOrderAutoAttack(ps->SelGroupToLogicGroup());
+        CmdOrder(ps, CMD_AUTO_ATTACK, CPoint(0, 0), NULL);
     }
     else if (element->m_strName == IF_MAIN_SELFBOMB) {
         if (ps->IsArcadeMode() && ps->GetArcadedObject()->IsLiveRobot()) {
@@ -3994,25 +3995,25 @@ void __stdcall CIFaceList::PlayerAction(void *object) {
     if (element->m_strName == IF_AORDER_PROTECT_ON) {
         RESETFLAG(m_IfListFlags, AUTO_FROBOT_ON | AUTO_CAPTURE_ON | AUTO_PROTECT_ON);
 
-        ps->PGOrderStop(ps->SelGroupToLogicGroup());
+        CmdOrder(ps, CMD_STOP, CPoint(0, 0), NULL);
     }
     else if (element->m_strName == IF_AORDER_PROTECT_OFF) {
         RESETFLAG(m_IfListFlags, AUTO_FROBOT_ON | AUTO_CAPTURE_ON | AUTO_PROTECT_ON);
         SETFLAG(m_IfListFlags, AUTO_PROTECT_ON);
 
-        ps->PGOrderAutoDefence(ps->SelGroupToLogicGroup());
+        CmdOrder(ps, CMD_AUTO_DEFENCE, CPoint(0, 0), NULL);
     }
 
     if (element->m_strName == IF_AORDER_CAPTURE_ON) {
         RESETFLAG(m_IfListFlags, AUTO_FROBOT_ON | AUTO_CAPTURE_ON | AUTO_PROTECT_ON);
 
-        ps->PGOrderStop(ps->SelGroupToLogicGroup());
+        CmdOrder(ps, CMD_STOP, CPoint(0, 0), NULL);
     }
     else if (element->m_strName == IF_AORDER_CAPTURE_OFF) {
         RESETFLAG(m_IfListFlags, AUTO_FROBOT_ON | AUTO_CAPTURE_ON | AUTO_PROTECT_ON);
         SETFLAG(m_IfListFlags, AUTO_CAPTURE_ON);
 
-        ps->PGOrderAutoCapture(ps->SelGroupToLogicGroup());
+        CmdOrder(ps, CMD_AUTO_CAPTURE, CPoint(0, 0), NULL);
     }
 
     if (element->m_strName == IF_ORDER_FIRE) {
@@ -4047,7 +4048,7 @@ void __stdcall CIFaceList::PlayerAction(void *object) {
         ResetOrderingMode();
     }
     else if (element->m_strName == IF_ORDER_STOP) {
-        ps->PGOrderStop(ps->SelGroupToLogicGroup());
+        CmdOrder(ps, CMD_STOP, CPoint(0, 0), NULL);
         // if(ps->m_CurGroup->m_Tactics){
         //    ps->m_CurGroup->DeInstallTactics();
         //}else{

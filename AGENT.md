@@ -1,4 +1,4 @@
-﻿# AGENT.md — MatrixGame
+# AGENT.md — MatrixGame
 
 Working rules and project map for AI agents (and humans) who modify this repository.
 Derived from the actual state of the `refactoring` branch (HEAD `549647e`), not from the README.
@@ -194,6 +194,9 @@ Environment switches:
 | `MATRIXGAME_TRACEBOT` | trace one object by id: Seek inputs, normal smoothing, matrix rebuilds |
 | `MATRIXGAME_TRACEFROM` / `MATRIXGAME_TRACETO` | game-time window for that trace, ms |
 | `MATRIXGAME_TRACEBOTLOG` | where the trace goes, default `tracebot.log` |
+| `MATRIXGAME_CMDLOG` | write the command stream to this file (it doubles as a replay) |
+| `MATRIXGAME_CMDREPLAY` | load a command log and apply it instead of generating commands |
+| `MATRIXGAME_CMDBOT` | scripted player: issue an order for the player side every N ticks |
 
 The differential technique: run the same battle twice with `MATRIXGAME_FILL=CD` and `MATRIXGAME_FILL=AA`. Anything the engine reads before writing it will differ between the two runs, so the first field that diverges is the uninitialised one. `tools/` has the whole loop:
 
@@ -207,6 +210,27 @@ The differential technique: run the same battle twice with `MATRIXGAME_FILL=CD` 
 `MATRIXGAME_OBJLOG` also reports, per robot, `garb=` (how many dwords still hold the fill byte) and `gof=` (their offsets, resolvable through the `.layout` file written next to the log). That is how the list of uninitialised fields above was produced.
 
 A run is started by `tools/Run-Sim.ps1`, which puts the harness DLL into the installed game and drives the menu: the planetary battle module only starts when the player picks it there, so a bare `Start-Process Rangers.exe` sits in the main menu and writes nothing. `-AutoStart` (the default) clicks the bottom-left «ПЛАНЕТАРНЫЕ БОИ» icon and then «СТАРТ»; the coordinates are fractions of a 2560x1440 screen, so on another resolution recalibrate them or pass `-AutoStart:$false` and drive the menu by hand. Wall-clock cost is roughly 30-60 s per second of game time, so a 30 s battle takes about half an hour of real time per pass.
+
+### Command layer (Phase 2)
+
+Input no longer touches the world. Right-click orders, the keyboard and interface auto-order buttons and the group `STOP` build an `SCommand` (`MatrixGame/src/CmdQueue.{hpp,cpp}`) and push it into a queue; the queue is applied at the start of logic tick `N + 3` (`CMD_INPUT_LAG_TICKS`, 30 ms), before the side takts. Both machines therefore execute an order at the same tick, and commands due on the same tick run in `(tick, side, seq)` order.
+
+A command carries the side id, the map-cell point, the target object's stable id, flags, and the list of selected robot ids. The selection is part of the command because group assignment is a simulation action: `CMatrixSideUnit::SelGroupToLogicGroup` reassigns `m_GroupLogic` of the selected robots and used to run inside the input handler, i.e. at frame time. It now runs when the command is applied (`CmdAssignGroup` in `CmdQueue.cpp`), from ids stored in the command. That also removes a real source of drift: two identical clicks could previously land in different logic groups depending on how many frames had passed.
+
+`MATRIXGAME_CMDLOG` writes the stream as text — a header (`v`, `map`, `seed`, `lag`) and one line per command. The same file is the replay: `MATRIXGAME_CMDREPLAY` loads it and applies the same commands at the same ticks, and `CmdIssue` refuses to add anything new in that mode. The match seed is no longer `time(NULL)` buried in init: `MatrixGameInit` calls `RndSetMatchSeed` with the seed chosen by the host (the harness takes `MATRIXGAME_SEED`) and writes it into the log header, where a replay checks it.
+
+To exercise the layer without a human, the harness has a scripted player: `MATRIXGAME_CMDBOT=<ticks>` makes it order the player side every N ticks (attack the k-th live enemy, move, or stop) through the very same `CmdIssue` path. In that mode the player side keeps the old AI economy — the bot queues a robot into the base every 25 ticks through the constructor, because building as a command is not implemented yet — while the army moves only on commands. Run both passes with `-CmdBot` so the economy fixture makes the same calls in each.
+
+```bat
+tools\Run-Sim.ps1 -Name p2a -Map armagedd -Seed 12345 -Ticks 60000 -HashStep 500 -NoDraw -CmdBot 50
+tools\Run-Sim.ps1 -Name p2c -Map armagedd -Seed 12345 -Ticks 60000 -HashStep 500 -NoDraw -CmdBot 50 ^
+                  -CmdReplay tools\logs\p2a-cmd.txt
+python tools\simdiff.py tools\logs\p2a.txt tools\logs\p2c.txt
+```
+
+Result (24.11.2026, 60 s of game time, 116 commands, 121 checkpoints): `armagedd`/12345 — two generation passes are identical (`6328608142b739b2`) and the replay of the first one is identical to both; the two command logs are byte-identical. `crossfire`/4242 — replay identical to generation (`eac52acc462d8868`).
+
+Still outside the stream (the next step of Phase 2): building robots and turrets (`CConstructorPanel`, `m_CurrentAction == BUILDING_TURRET`), flyer orders (`CMatrixFlyer::SetTarget` runs at frame time and consumes logic-RNG numbers there), entering/leaving a robot (arcade mode) and the multi-selection UI state.
 
 ## 9. Pre-commit checklist
 

@@ -27,6 +27,7 @@
 #include "Interface/CHistory.h"
 #include "MatrixInstantDraw.hpp"
 #include "MatrixSampleStateManager.hpp"
+#include "CmdQueue.hpp"
 
 #include <stdio.h>
 #include <time.h>
@@ -204,8 +205,18 @@ void MatrixGameInit(HINSTANCE inst, HWND wnd, wchar *map, SRobotsSettings *set, 
 
     // Бой начинается с чистого логического потока ГПСЧ: до него в том же
     // процессе работает меню (и его превью карты), которое тоже тратит числа.
-    // В сетевой сборке сюда придёт сид из лобби, поэтому это параметр.
-    RndResetLogic((unsigned)time(NULL));
+    // Сид назначает хост матча (RndSetMatchSeed), он же попадает в лог команд;
+    // если сид никто не задал, берём time(NULL), как раньше.
+    {
+        unsigned seed = RndMatchSeed();
+#ifdef MATRIXGAME_SIM_HARNESS
+        if (seed == 0)
+            seed = SimSeed(12345);
+#endif
+        if (seed == 0)
+            seed = (unsigned)time(NULL);
+        RndSetMatchSeed(seed);
+    }
 
 #ifdef MATRIXGAME_SIM_HARNESS
     {
@@ -472,8 +483,18 @@ void MatrixGameInit(HINSTANCE inst, HWND wnd, wchar *map, SRobotsSettings *set, 
     // Автоигра: обе стороны под ИИ, камера сама, по завершении бой выходит.
     if (SimModeEnabled()) {
         SETFLAG(g_MatrixMap->m_Flags, MMFLAG_AUTOMATIC_MODE | MMFLAG_FLYCAM | MMFLAG_FULLAUTO);
+
+        // Командный бот управляет стороной игрока приказами, поэтому автоигру
+        // именно этой стороны выключаем. FULLAUTO оставляем: по нему бой
+        // завершается и процесс выходит сам.
+        if (SimCommandBotEnabled())
+            RESETFLAG(g_MatrixMap->m_Flags, MMFLAG_AUTOMATIC_MODE);
     }
 #endif
+
+    // Слой команд: шапка лога, загрузка реплея. Нужен после того, как карта
+    // загружена (имя карты и сид идут в шапку).
+    CmdInit();
 
     g_MatrixMap->CalcCannonPlace();
     SSpecialBot::LoadAIRobotType(*g_MatrixData->BlockGet(L"AIRobotType"));
@@ -753,6 +774,8 @@ void SRobotsSettings::ApplyVideoParams(void) {
 
 void MatrixGameDeinit(void) {
     DTRACE();
+
+    CmdShutdown();
 
     SSpecialBot::ClearAIRobotType();
 

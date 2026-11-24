@@ -12,6 +12,9 @@
 #include "MatrixMapStatic.hpp"
 #include "MatrixObject.hpp"
 #include "MatrixRobot.hpp"
+#include "MatrixSide.hpp"
+#include "CmdQueue.hpp"
+#include "Interface/CConstructor.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -770,6 +773,131 @@ void SimLogTakt(int step) {
 
         SETFLAG(g_Flags, GFLAG_EXITLOOP);
     }
+}
+
+// Командный бот (фаза 2). Играет за сторону игрока теми же приказами, что и
+// живой человек: собирает SCommand и кладёт её в CmdQueue. Прогон с ботом
+// пишет лог команд, прогон по этому логу (MATRIXGAME_CMDREPLAY) должен дать
+// побитово тот же мир — это и есть проверка командного слоя.
+
+static int CmdBotPeriod(void) {
+    static int period = -2;
+    if (period == -2) {
+        period = EnvInt(L"MATRIXGAME_CMDBOT");
+        if (period < 0)
+            period = 0;
+    }
+    return period;
+}
+
+bool SimCommandBotEnabled(void) {
+    return CmdBotPeriod() > 0;
+}
+
+// Ставит одного робота в очередь сборки базы. Это тот же путь, которым строит
+// ИИ (CMatrixSideUnit::BuildRobot) и человек (кнопка в конструкторе), только без
+// списания ресурсов: для проверки слоя команд важна не экономика, а то, что
+// приказы армии идут через лог.
+static void BotBuildRobot(CMatrixSideUnit *ps) {
+    CMatrixBuilding *base = NULL;
+    for (CMatrixMapStatic *obj = CMatrixMapStatic::GetFirstLogic(); obj; obj = obj->GetNextLogic()) {
+        if (obj->IsLiveBuilding() && obj->GetSide() == ps->m_Id && obj->IsBase()) {
+            base = obj->AsBuilding();
+            break;
+        }
+    }
+    if (!base || base->m_BS.GetItemsCnt() >= 6)
+        return;
+
+    ps->m_Constructor->SetBase(base);
+    ps->m_Constructor->BuildSpecialBot(SSpecialBot::m_AIRobotTypeList[0]);
+}
+
+void SimCommandBotTick(int tick) {
+    const int period = CmdBotPeriod();
+
+    if (period <= 0 || tick <= 0 || !g_MatrixMap)
+        return;
+
+    CMatrixSideUnit *ps = g_MatrixMap->GetPlayerSide();
+    if (!ps || ps->GetStatus() == SS_NONE)
+        return;
+
+    // Экономика стороны игрока пока остаётся за старым ИИ-стройщиком: армией
+    // командует скрипт, но роботов по-прежнему строит база. Строительство как
+    // команда — следующий шаг фазы 2 (docs/NETPLAY_PLAN.md §5). Период фиксирован,
+    // поэтому прогон по логу делает ровно те же вызовы.
+    if ((tick % 25) == 0 && SSpecialBot::m_AIRobotTypeList && SSpecialBot::m_AIRobotTypeCnt > 0)
+        BotBuildRobot(ps);
+
+    if (CmdReplayMode() || (tick % period) != 0)
+        return;
+
+    SCommand cmd;
+    ZeroMemory(&cmd, sizeof(cmd));
+    cmd.m_ObjId = -1;
+    cmd.m_Side = ps->m_Id;
+
+    // Выделение — все живые роботы стороны: бот не пользуется мышью, поэтому
+    // вместо UI-группы он каждый раз собирает полный список.
+    int ownCnt = 0, cx = 0, cy = 0;
+    for (CMatrixMapStatic *obj = CMatrixMapStatic::GetFirstLogic(); obj; obj = obj->GetNextLogic()) {
+        if (!obj->IsLiveRobot() || obj->GetSide() != ps->m_Id)
+            continue;
+        if (cmd.m_SelCnt < CMD_SEL_MAX)
+            cmd.m_Sel[cmd.m_SelCnt++] = (int)obj->GetId();
+        CPoint p = CmdObjectPos(obj);
+        cx += p.x;
+        cy += p.y;
+        ++ownCnt;
+    }
+    if (cmd.m_SelCnt <= 0)
+        return;
+    cx /= ownCnt;
+    cy /= ownCnt;
+
+    // Цель — k-й по счёту живой враг в списке логики. Порядок обхода задаёт
+    // симуляция, поэтому выбор одинаков во всех прогонах с тем же миром.
+    CMatrixMapStatic *targets[32];
+    int cnt = 0;
+    for (CMatrixMapStatic *obj = CMatrixMapStatic::GetFirstLogic(); obj; obj = obj->GetNextLogic()) {
+        if (cnt >= 32)
+            break;
+        if (obj->GetSide() == ps->m_Id)
+            continue;
+        if (obj->IsLiveRobot() || obj->IsLiveCannon())
+            targets[cnt++] = obj;
+    }
+
+    const int k = tick / period;
+
+    if ((k % 7) == 6) {
+        cmd.m_Type = CMD_STOP;
+    }
+    else if (cnt > 0) {
+        CPoint tp = CmdObjectPos(targets[k % cnt]);
+        int dx = ((k * 7) % 21) - 10;
+        int dy = ((k * 11) % 21) - 10;
+
+        if ((k % 4) == 3) {
+            cmd.m_Type = CMD_MOVE_TO;
+            cmd.m_X = tp.x + dx;
+            cmd.m_Y = tp.y + dy;
+        }
+        else {
+            cmd.m_Type = CMD_ATTACK;
+            cmd.m_ObjId = (int)targets[k % cnt]->GetId();
+            cmd.m_X = tp.x;
+            cmd.m_Y = tp.y;
+        }
+    }
+    else {
+        cmd.m_Type = CMD_MOVE_TO;
+        cmd.m_X = cx + ((k * 13) % 31) - 15;
+        cmd.m_Y = cy + ((k * 17) % 31) - 15;
+    }
+
+    CmdIssue(cmd);
 }
 
 #endif  // MATRIXGAME_SIM_HARNESS

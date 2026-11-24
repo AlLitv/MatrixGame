@@ -30,6 +30,11 @@ bool RndDrawPhase(void);
 // лобби, поэтому он параметр, а не time(NULL) внутри.
 void RndResetLogic(unsigned seed);
 
+// Сид матча: его выбирает хост (в будущем — лобби), он же пишется в лог команд
+// и шапку реплея. 0 — сид ещё не назначен, MatrixGameInit возьмёт time(NULL).
+unsigned RndMatchSeed(void);
+void RndSetMatchSeed(unsigned seed);
+
 // Счётчики вызовов — для логов и проверок.
 unsigned long long RndLogicCallCount(void);
 unsigned long long RndVisualCallCount(void);

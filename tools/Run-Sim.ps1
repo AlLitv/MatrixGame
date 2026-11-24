@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Runs one deterministic simulation pass and waits for the game to exit.
 
@@ -41,6 +41,9 @@ param(
     [int]$TraceBot = 0,
     [int]$TraceFrom = 0,
     [int]$TraceTo = 0,
+    [int]$CmdBot = 0,
+    [string]$CmdLog = "",
+    [string]$CmdReplay = "",
     [bool]$AutoStart = $true,
     [switch]$NoDraw,
     [int]$TimeoutSec = 900
@@ -85,10 +88,23 @@ else {
     Remove-Item Env:\MATRIXGAME_TRACEBOT, Env:\MATRIXGAME_TRACEFROM, Env:\MATRIXGAME_TRACETO, Env:\MATRIXGAME_TRACEBOTLOG -ErrorAction SilentlyContinue
 }
 
+# Command layer (phase 2): the bot plays the player side with the same commands a
+# human would issue, and writes them to a log; a replay run reads that log back
+# and must reproduce the battle bit for bit.
+$cmdLogPath = ""
+if ($CmdLog) { $cmdLogPath = [System.IO.Path]::GetFullPath($CmdLog) }
+elseif ($CmdBot -gt 0) { $cmdLogPath = Join-Path $logs "$Name-cmd.txt" }
+
+if ($cmdLogPath) { $env:MATRIXGAME_CMDLOG = $cmdLogPath } else { Remove-Item Env:\MATRIXGAME_CMDLOG -ErrorAction SilentlyContinue }
+if ($CmdReplay) { $env:MATRIXGAME_CMDREPLAY = [System.IO.Path]::GetFullPath($CmdReplay) } else { Remove-Item Env:\MATRIXGAME_CMDREPLAY -ErrorAction SilentlyContinue }
+if ($CmdBot -gt 0) { $env:MATRIXGAME_CMDBOT = "$CmdBot" } else { Remove-Item Env:\MATRIXGAME_CMDBOT -ErrorAction SilentlyContinue }
+
 "run      : $Name"
 "map/seed : $Map / $Seed, step $(if ($Step -gt 0) { "$Step ms" } else { "measured (whole ticks)" }), max $Ticks ms, hash step $(if ($HashStep -gt 0) { $HashStep } else { 100 }) ms"
 "alloc fill: $(if ($Fill) { "0x$Fill" } else { '00 (default)' })$(if ($Poison -gt 0) { ", stack poison $Poison B" } else { '' })$(if ($RandLog) { ', rand log on' } else { '' })"
 "autostart: $(if ($AutoStart) { 'menu -> planetary battles -> START' } else { 'off' })$(if ($NoDraw) { ', no draw' } else { '' })"
+if ($CmdBot -gt 0) { "commands : bot every $CmdBot ticks -> $cmdLogPath" }
+if ($CmdReplay) { "commands : replay from $($env:MATRIXGAME_CMDREPLAY)" }
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $proc = Start-Process -FilePath $exe -WorkingDirectory $GameDir -PassThru
@@ -166,4 +182,10 @@ else {
 
 if ($RandLog -and (Test-Path $env:MATRIXGAME_RANDLOG)) {
     "rand log : $($env:MATRIXGAME_RANDLOG)"
+}
+
+if ($cmdLogPath -and (Test-Path $cmdLogPath)) {
+    $cmdLines = Get-Content $cmdLogPath
+    "cmd log  : $cmdLogPath ($($cmdLines.Count) lines)"
+    $cmdLines | Select-Object -Last 2 | ForEach-Object { "  $_" }
 }

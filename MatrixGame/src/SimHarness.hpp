@@ -96,4 +96,10 @@ void SimDumpLayouts(FILE *f);
 bool SimTraceBotOn(unsigned id);
 void SimTraceBotf(unsigned id, const char *fmt, ...);
 
+// Скриптовый «игрок» для проверки слоя команд (фаза 2 сетевого плана):
+// MATRIXGAME_CMDBOT=<тактов> — период, с которым бот ставит приказы за сторону
+// игрока. Прогон с ботом пишет лог команд, прогон по логу должен дать тот же мир.
+bool SimCommandBotEnabled(void);
+void SimCommandBotTick(int tick);
+
 #endif

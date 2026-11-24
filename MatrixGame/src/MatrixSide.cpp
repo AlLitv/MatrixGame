@@ -23,6 +23,7 @@
 #include "MatrixObjectCannon.hpp"
 #include "MatrixFlyer.hpp"
 #include "Interface/CCounter.h"
+#include "CmdQueue.hpp"
 #include <time.h>
 
 // robot->GetEnv()->m_Place -   место куда робот идет или где стоит.
@@ -679,8 +680,8 @@ void CMatrixSideUnit::OnLButtonDown(const CPoint &) {
             // Move
             RESETFLAG(g_IFaceList->m_IfListFlags, PREORDER_MOVE | ORDERING_MODE);
 
-            PGOrderMoveTo(SelGroupToLogicGroup(),
-                          CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2));
+            CmdOrder(this, CMD_MOVE_TO,
+                     CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2), NULL);
 
             CMatrixGroup *group = GetCurGroup();
             CMatrixGroupObject *objs = group->m_FirstObject;
@@ -703,13 +704,13 @@ void CMatrixSideUnit::OnLButtonDown(const CPoint &) {
             if (IS_TRACE_STOP_OBJECT(pObject) && (pObject->IsLive() || pObject->IsSpecial())) {
                 RESETFLAG(g_IFaceList->m_IfListFlags, PREORDER_FIRE | ORDERING_MODE);
 
-                PGOrderAttack(SelGroupToLogicGroup(), GetMapPos(pObject), pObject);
+                CmdOrderObject(this, CMD_ATTACK, pObject);
             }
             else {
                 RESETFLAG(g_IFaceList->m_IfListFlags, PREORDER_FIRE | ORDERING_MODE);
 
-                PGOrderAttack(SelGroupToLogicGroup(),
-                              CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2), NULL);
+                CmdOrder(this, CMD_ATTACK,
+                         CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2), NULL);
             }
         }
         else if (FLAG(g_IFaceList->m_IfListFlags, PREORDER_CAPTURE)) {
@@ -717,27 +718,27 @@ void CMatrixSideUnit::OnLButtonDown(const CPoint &) {
             if (IS_TRACE_STOP_OBJECT(pObject) && pObject->IsLiveBuilding() && pObject->GetSide() != PLAYER_SIDE) {
                 RESETFLAG(g_IFaceList->m_IfListFlags, PREORDER_CAPTURE | ORDERING_MODE);
 
-                PGOrderCapture(SelGroupToLogicGroup(), (CMatrixBuilding *)pObject);
+                CmdOrderObject(this, CMD_CAPTURE, pObject);
             }
         }
         else if (FLAG(g_IFaceList->m_IfListFlags, PREORDER_PATROL)) {
             // Patrol
             RESETFLAG(g_IFaceList->m_IfListFlags, PREORDER_PATROL | ORDERING_MODE);
-            PGOrderPatrol(SelGroupToLogicGroup(),
-                          CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2));
+            CmdOrder(this, CMD_PATROL,
+                     CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2), NULL);
         }
         else if (FLAG(g_IFaceList->m_IfListFlags, PREORDER_BOMB)) {
             // Nuclear BOMB!!! spasaisya kto mozhet!!! dab shas rvanet bombu!!!!
             if (IS_TRACE_STOP_OBJECT(pObject) && (pObject->IsLive() || pObject->IsSpecial())) {
                 RESETFLAG(g_IFaceList->m_IfListFlags, PREORDER_BOMB | ORDERING_MODE);
 
-                PGOrderBomb(SelGroupToLogicGroup(), GetMapPos(pObject), pObject);
+                CmdOrderObject(this, CMD_BOMB, pObject);
             }
             else {
                 RESETFLAG(g_IFaceList->m_IfListFlags, PREORDER_BOMB | ORDERING_MODE);
 
-                PGOrderBomb(SelGroupToLogicGroup(),
-                            CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2), NULL);
+                CmdOrder(this, CMD_BOMB,
+                         CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2), NULL);
             }
         }
         else if (FLAG(g_IFaceList->m_IfListFlags, PREORDER_REPAIR)) {
@@ -745,7 +746,7 @@ void CMatrixSideUnit::OnLButtonDown(const CPoint &) {
             if (IS_TRACE_STOP_OBJECT(pObject) && pObject->IsLive() && pObject->GetSide() == PLAYER_SIDE) {
                 RESETFLAG(g_IFaceList->m_IfListFlags, PREORDER_REPAIR | ORDERING_MODE);
 
-                PGOrderRepair(SelGroupToLogicGroup(), (CMatrixBuilding *)pObject);
+                CmdOrderObject(this, CMD_REPAIR, pObject);
             }
         }
     }
@@ -844,17 +845,17 @@ void CMatrixSideUnit::OnRButtonDown(const CPoint &) {
         (m_CurrSel == GROUP_SELECTED || m_CurrSel == ROBOT_SELECTED || m_CurrSel == FLYER_SELECTED)) {
         if (IS_TRACE_STOP_OBJECT(pObject) && pObject->IsLiveBuilding() && pObject->GetSide() != m_Id) {
             // Capture
-            PGOrderCapture(SelGroupToLogicGroup(), (CMatrixBuilding *)pObject);
+            CmdOrderObject(this, CMD_CAPTURE, pObject);
         }
         else if (IS_TRACE_STOP_OBJECT(pObject) &&
                  ((IsLiveUnit(pObject) && pObject->GetSide() != m_Id) || pObject->IsSpecial())) {
             // Attack
-            PGOrderAttack(SelGroupToLogicGroup(), GetMapPos(pObject), pObject);
+            CmdOrderObject(this, CMD_ATTACK, pObject);
         }
         else if (pObject == TRACE_STOP_LANDSCAPE || pObject == TRACE_STOP_WATER || (IS_TRACE_STOP_OBJECT(pObject))) {
             // MoveTo
-            PGOrderMoveTo(SelGroupToLogicGroup(),
-                          CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2));
+            CmdOrder(this, CMD_MOVE_TO,
+                     CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2), NULL);
 
             CMatrixGroupObject *objs = GetCurGroup()->m_FirstObject;
             while (objs) {

@@ -105,3 +105,16 @@ unsigned long long RndVisualCallCount(void) {
 }
 
 #endif  // MATRIXGAME_SIM_HARNESS
+
+// Сид матча общий для обеих реализаций: его пишет лог команд, его проверяет
+// реплей, и его же в будущем будет присылать лобби.
+static unsigned s_matchSeed = 0;
+
+unsigned RndMatchSeed(void) {
+    return s_matchSeed;
+}
+
+void RndSetMatchSeed(unsigned seed) {
+    s_matchSeed = seed;
+    RndResetLogic(seed);
+}
