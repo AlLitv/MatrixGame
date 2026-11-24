@@ -428,10 +428,11 @@ void CMatrixSideUnit::LogicTakt(int ms) {
     }
 
     if (GetStatus() != SS_NONE) {
-        DWORD ctime = timeGetTime();
-        DWORD v = (g_MatrixMap->GetStartTime() <= ctime) ? (ctime - g_MatrixMap->GetStartTime())
-                                                         : (0xFFFFFFFF - g_MatrixMap->GetStartTime() + ctime);
-        SetStatValue(STAT_TIME, v);
+        // Время боя берём из игровых часов, а не из wall-clock: те идут целыми
+        // тактами, поэтому одинаковы у всех машин и в реплее. Раньше здесь было
+        // timeGetTime(), и статистика (а через неё исход боя) зависела от того,
+        // как быстро шёл процесс.
+        SetStatValue(STAT_TIME, (DWORD)g_MatrixMap->GetTime());
     }
 
     DCP();
