@@ -154,12 +154,13 @@ Verified runs (24.11.2026, harness build, `MATRIXGAME_NODRAW=1` unless said othe
 | `armagedd` | 777 | 38.5 s | 66 | identical | identical | not run |
 | `bigcrater` | 4242 | 6 s | 59 | identical | identical | not run |
 | `islands` | 31337 | 1 s | 75 | identical | identical | not run |
+| `crossfire` | 4242 | 180 s (limit) | 87-121 | identical (181 pts) | identical | not run |
 
 Auto-play battles end quickly: the AI resolves the map in 1-55 s, so the «120 s of game time» from the acceptance list is not reachable on this build — the longest map found is `crossfire` at 55 s with 121 objects. Use several maps and seeds instead of one long run.
 
 One flake worth knowing about: the very first pass after the DLL was swapped once reported one extra object at the first checkpoint and never reproduced. `tools/Check-Determinism.ps1` retries a failing pair once for that reason, and a real desync reproduces every time.
 
-Battles can also end early because the engine crashes, not because they finished. `protectedBlock1` in `MatrixGameDll.cpp` catches the access violation and exits quietly, which is why such a run used to look like "the battle ended at 51 s". The harness now installs an `__except` filter that writes `EXCEPTION code=0x... addr=0x... module=0x...` into `MATRIXGAME_TRACE`, and the hash line carries `bwd=` (win/lose countdown) and `xl=` (exit-loop flag) so a silent stop is distinguishable from a real ending. First catch: `crossfire` dies with `0xc0000005` at module offset `0xb709c` around t=51-55 s in both drawn and no-draw runs, while three sides are still active — a separate engine bug, not a desync; everything up to that tick compares equal.
+A run can also stop because something crashed, not because the battle finished: `protectedBlock1` in `MatrixGameDll.cpp` catches the exception and exits quietly, so `MATRIXGAME_TRACE` plus `bwd=`/`xl=` in the hash line is the only way to tell the difference. That is how the first catch was found: `crossfire` died with `0xc0000005` inside `DumpObjects` after about 51 s. The faulting read was `m_Unit[u].m_WeaponRepairData->m_Flags` — the engine leaves that pointer dangling after `SWeaponRepairData::Release` (a real latent bug, the harness was simply the first reader), and the dump no longer follows it. With that fixed, `crossfire` runs the full 180 s of game time and both pairs match over 181 checkpoints.
 
 The harness lives in `MatrixGame/src/SimHarness.{hpp,cpp}` and is inert unless `MATRIXGAME_SIM_HARNESS` is defined. Build it with:
 
