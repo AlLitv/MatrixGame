@@ -1,4 +1,4 @@
-﻿// MatrixGame - SR2 Planetary battles engine
+// MatrixGame - SR2 Planetary battles engine
 // Copyright (C) 2012, Elemental Games, Katauri Interactive, CHK-Games
 // Licensed under GPLv2 or any later version
 
@@ -688,9 +688,18 @@ void SimLogTakt(int step) {
         const unsigned long long hash = HashWorld(&objects);
 
         if (log) {
-            fprintf(log, "t=%d objects=%d rand=%llu logic=%llu hash=%016llx rep=%d/%d/%d\n", time, objects,
-                    SimRandCalls(), SimLogicRandCalls(), hash, g_repairStats[SIMREP_ALLOC],
-                    g_repairStats[SIMREP_ENTER], g_repairStats[SIMREP_PASS]);
+            // Помимо мира печатаем состояние сторон: исход боя решается по их
+            // статусам, а они в хеш не входят — иначе прогон, где бой закончился
+            // на такт раньше, расходится «молча», уже после последней строки.
+            int active = 0;
+            for (int i = 0; i < g_MatrixMap->m_SideCnt; ++i) {
+                if (g_MatrixMap->m_Side[i].GetStatus() == SS_ACTIVE)
+                    ++active;
+            }
+            fprintf(log, "t=%d objects=%d rand=%llu logic=%llu hash=%016llx rep=%d/%d/%d pst=%d act=%d\n",
+                    time, objects, SimRandCalls(), SimLogicRandCalls(), hash, g_repairStats[SIMREP_ALLOC],
+                    g_repairStats[SIMREP_ENTER], g_repairStats[SIMREP_PASS],
+                    (int)g_MatrixMap->GetPlayerSide()->GetStatus(), active);
             g_repairStats[SIMREP_ALLOC] = g_repairStats[SIMREP_ENTER] = g_repairStats[SIMREP_PASS] = 0;
             fflush(log);
         }
