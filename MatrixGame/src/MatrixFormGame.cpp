@@ -234,7 +234,28 @@ void CFormMatrixGame::Takt(int step) {
     if (g_MatrixMap->CheckLostDevice())
         return;
 
-    g_MatrixMap->Takt(step);
+    // Логика идёт целыми тактами по LOGIC_TAKT_PERIOD, а остаток копится между
+    // кадрами. Раньше сюда приходил измеренный шаг, и CMatrixMapLogic::Takt сам
+    // дробил его на куски: при 60 fps получалось 16 мс за кадр вместо ровных
+    // 10+6, и физика зависела от частоты кадров. Теперь время симуляции
+    // складывается только из целых тактов.
+    {
+        static double takt_accum = 0.0;
+
+        if (step > 0)
+            takt_accum += double(step);
+
+        // Догонять бесконечно нельзя: после паузы или лага ограничиваем запас,
+        // иначе игра «телепортируется» на несколько тактов за один кадр.
+        const double max_accum = double(LOGIC_TAKT_PERIOD) * 8.0;
+        if (takt_accum > max_accum)
+            takt_accum = max_accum;
+
+        while (takt_accum >= double(LOGIC_TAKT_PERIOD)) {
+            takt_accum -= double(LOGIC_TAKT_PERIOD);
+            g_MatrixMap->Takt(LOGIC_TAKT_PERIOD);
+        }
+    }
 
     CPoint mp = g_MatrixMap->m_Cursor.GetPos();
 

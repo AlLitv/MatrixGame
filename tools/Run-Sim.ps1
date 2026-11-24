@@ -59,7 +59,7 @@ if (-not (Test-Path $dll)) { throw "No MatrixGame.dll in the game folder: $dll" 
 
 $env:MATRIXGAME_SIM = '1'
 $env:MATRIXGAME_SEED = "$Seed"
-$env:MATRIXGAME_FIXEDSTEP = "$Step"
+if ($Step -gt 0) { $env:MATRIXGAME_FIXEDSTEP = "$Step" } else { Remove-Item Env:\MATRIXGAME_FIXEDSTEP -ErrorAction SilentlyContinue }
 $env:MATRIXGAME_MAXTICKS = "$Ticks"
 $env:MATRIXGAME_MAP = $Map
 $env:MATRIXGAME_HASHLOG = Join-Path $logs "$Name.txt"
@@ -86,7 +86,7 @@ else {
 }
 
 "run      : $Name"
-"map/seed : $Map / $Seed, step $Step ms, max $Ticks ms, hash step $(if ($HashStep -gt 0) { $HashStep } else { 100 }) ms"
+"map/seed : $Map / $Seed, step $(if ($Step -gt 0) { "$Step ms" } else { "measured (whole ticks)" }), max $Ticks ms, hash step $(if ($HashStep -gt 0) { $HashStep } else { 100 }) ms"
 "alloc fill: $(if ($Fill) { "0x$Fill" } else { '00 (default)' })$(if ($Poison -gt 0) { ", stack poison $Poison B" } else { '' })$(if ($RandLog) { ', rand log on' } else { '' })"
 "autostart: $(if ($AutoStart) { 'menu -> planetary battles -> START' } else { 'off' })$(if ($NoDraw) { ', no draw' } else { '' })"
 
