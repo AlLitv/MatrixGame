@@ -1,4 +1,4 @@
-// MatrixGame - SR2 Planetary battles engine
+﻿// MatrixGame - SR2 Planetary battles engine
 // Copyright (C) 2012, Elemental Games, Katauri Interactive, CHK-Games
 // Licensed under GPLv2 or any later version
 // Refer to the LICENSE file included
@@ -143,9 +143,8 @@ void CFormMatrixGame::Draw(void) {
     // чтобы кадровые эффекты не сдвигали последовательность логики. Переключаемся
     // до BeforeDraw, потому что он тоже кадровый: он тратит числа ГПСЧ и создаёт
     // эффекты, а раньше это шло в логический поток.
-#ifdef MATRIXGAME_SIM_HARNESS
-    SimSetPhase(SIMPHASE_VISUAL);
-#endif
+    // Весь кадр целиком — визуальная фаза:
+    RndSetDrawPhase(true);
     g_MatrixMap->BeforeDraw();
 
     // ASSERT_DX(g_D3DD->Clear( 0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL,
@@ -223,9 +222,7 @@ void CFormMatrixGame::Draw(void) {
     SetWindowTextA(g_Wnd, buff);
 #endif
 
-#ifdef MATRIXGAME_SIM_HARNESS
-    SimSetPhase(SIMPHASE_LOGIC);
-#endif
+    RndSetDrawPhase(false);
 }
 
 void CFormMatrixGame::Takt(int step) {

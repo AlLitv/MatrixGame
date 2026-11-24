@@ -1,4 +1,4 @@
-// MatrixGame - SR2 Planetary battles engine
+﻿// MatrixGame - SR2 Planetary battles engine
 // Copyright (C) 2012, Elemental Games, Katauri Interactive, CHK-Games
 // Licensed under GPLv2 or any later version
 // Refer to the LICENSE file included
@@ -18,16 +18,16 @@
 #include <malloc.h>
 #include <memory.h>
 #include <tchar.h>
+#include <time.h>
 
 // TODO: reference additional headers your program requires here
 #include "../../MatrixLib/3G/3g.pch"
 
-#ifdef MATRIXGAME_SIM_HARNESS
-// Харнесс детерминизма: считаем вызовы ГПСЧ. Макрос объявлен до игровых
-// заголовков, потому что RND/FRND в Math3D.hpp зовут rand() напрямую.
-unsigned SimRand(void);
-#define rand() SimRand()
-#endif
+// Два потока ГПСЧ: логический (влияет на мир) и визуальный (кадровые эффекты).
+// Макрос объявлен до игровых заголовков, потому что RND/FRND в Math3D.hpp зовут
+// rand() напрямую, а решение «какой поток» принимает RndDispatch.
+#include "RndSplit.hpp"
+#define rand() RndDispatch()
 
 #include "../../MatrixLib/3G/3g.hpp"
 #include "../../MatrixLib/3G/VectorObject.hpp"
