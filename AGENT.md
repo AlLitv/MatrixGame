@@ -159,6 +159,8 @@ Auto-play battles end quickly: the AI resolves the map in 1-55 s, so the «120 s
 
 One flake worth knowing about: the very first pass after the DLL was swapped once reported one extra object at the first checkpoint and never reproduced. `tools/Check-Determinism.ps1` retries a failing pair once for that reason, and a real desync reproduces every time.
 
+Battles can also end early because the engine crashes, not because they finished. `protectedBlock1` in `MatrixGameDll.cpp` catches the access violation and exits quietly, which is why such a run used to look like "the battle ended at 51 s". The harness now installs an `__except` filter that writes `EXCEPTION code=0x... addr=0x... module=0x...` into `MATRIXGAME_TRACE`, and the hash line carries `bwd=` (win/lose countdown) and `xl=` (exit-loop flag) so a silent stop is distinguishable from a real ending. First catch: `crossfire` dies with `0xc0000005` at module offset `0xb709c` around t=51-55 s in both drawn and no-draw runs, while three sides are still active — a separate engine bug, not a desync; everything up to that tick compares equal.
+
 The harness lives in `MatrixGame/src/SimHarness.{hpp,cpp}` and is inert unless `MATRIXGAME_SIM_HARNESS` is defined. Build it with:
 
 ```bat
