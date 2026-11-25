@@ -58,6 +58,7 @@ TYPES = {
     'AUTOATK': 9,
     'AUTODEF': 10,
     'BUILD': 11,
+    'TURRET': 12,
 }
 
 TICK_MS = 10

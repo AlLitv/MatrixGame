@@ -59,6 +59,8 @@ const char *CmdTypeName(int t) {
             return "AUTODEF";
         case CMD_BUILD_ROBOT:
             return "BUILD";
+        case CMD_BUILD_TURRET:
+            return "TURRET";
     }
     return "NONE";
 }
@@ -135,7 +137,7 @@ void CmdLogCommand(const SCommand &c, bool remote = false) {
     for (int i = 0; i < c.m_SelCnt; ++i)
         fprintf(g_Log, "%s%d", i ? "," : "", c.m_Sel[i]);
     fprintf(g_Log, " seq=%u", c.m_Seq);
-    if (c.m_Type == CMD_BUILD_ROBOT) {
+    if (c.m_Type == CMD_BUILD_ROBOT || c.m_Type == CMD_BUILD_TURRET) {
         for (int i = 0; i < CMD_PARAM_CNT; ++i)
             fprintf(g_Log, " p%d=%d", i, c.m_Param[i]);
     }
@@ -328,6 +330,57 @@ void CmdApplyBuild(CMatrixSideUnit *su, const SCommand &c) {
     }
 }
 
+// Постройка турели на здании. Раньше пушка создавалась прямо в обработчике
+// клика (CMatrixSideUnit::OnLButtonDown), то есть в момент кадра: в сети это
+// дало бы турель только у того, кто её поставил.
+void CmdApplyTurret(CMatrixSideUnit *su, const SCommand &c) {
+    if (!g_MatrixMap || !su)
+        return;
+
+    const int num = c.m_Param[0];
+    if (num < 1 || num > CANNON_TYPE_CNT)
+        return;
+
+    CMatrixMapStatic *obj = CmdFindObject(c.m_ObjId);
+    if (!obj || !obj->IsLiveBuilding() || obj->GetSide() != su->m_Id)
+        return;
+
+    CMatrixBuilding *parent = obj->AsBuilding();
+    if (parent->m_TurretsHave >= parent->m_TurretsMax)
+        return;
+
+    const SCannonProps &props = g_Config.m_CannonsProps[num - 1];
+    if (!su->IsEnoughResources(props.m_Resources))
+        return;
+
+    for (int r = 0; r < MAX_RESOURCES; ++r)
+        su->AddResourceAmount(ERes(r), -props.m_Resources[r]);
+
+    CMatrixCannon *ca = g_MatrixMap->StaticAdd<CMatrixCannon>(true);
+    ca->m_CurrState = CANNON_UNDER_CONSTRUCTION;
+    ca->SetInvulnerability();
+
+    ca->m_Pos.x = (float)c.m_Param[1] / 100.0f;
+    ca->m_Pos.y = (float)c.m_Param[2] / 100.0f;
+    ca->m_Place = c.m_Param[4];
+
+    ca->SetSide(su->m_Id);
+    ca->UnitInit(num);
+    ca->m_Angle = c.m_Param[3];
+    ca->m_AddH = 0;
+
+    ca->m_ShadowType = SHADOW_STENCIL;
+    ca->m_ShadowSize = 128;
+
+    ca->RNeed(MR_Matrix | MR_Graph);
+    ca->m_ParentBuilding = parent;
+    ca->JoinToGroup();
+
+    parent->m_TurretsHave++;
+    ca->SetHitPoint(0);
+    parent->m_BS.AddItem(ca);
+}
+
 void CmdApply(const SCommand &c) {
     if (!g_MatrixMap)
         return;
@@ -338,6 +391,10 @@ void CmdApply(const SCommand &c) {
 
     if (c.m_Type == CMD_BUILD_ROBOT) {
         CmdApplyBuild(su, c);
+        return;
+    }
+    if (c.m_Type == CMD_BUILD_TURRET) {
+        CmdApplyTurret(su, c);
         return;
     }
 

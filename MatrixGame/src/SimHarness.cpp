@@ -856,6 +856,46 @@ void SimCommandBotTick(int tick) {
         }
     }
 
+    // Турели — тоже приказом, чтобы этот путь попадал в эталон и в сетевой тест.
+    if ((tick % 100) == 0) {
+        for (int sidx = 0; sidx < sideCnt; ++sidx) {
+            CMatrixSideUnit *s = &g_MatrixMap->m_Side[sideIdx[sidx]];
+            if (s->GetResourcesAmount(TITAN) < g_Config.m_CannonsProps[0].m_Resources[TITAN])
+                continue;
+
+            CMatrixBuilding *bld = NULL;
+            for (CMatrixMapStatic *obj = CMatrixMapStatic::GetFirstLogic(); obj; obj = obj->GetNextLogic()) {
+                if (!obj->IsLiveBuilding() || obj->GetSide() != s->m_Id)
+                    continue;
+                if (obj->AsBuilding()->m_TurretsHave >= obj->AsBuilding()->m_TurretsMax)
+                    continue;
+                bld = obj->AsBuilding();
+                break;
+            }
+            if (!bld)
+                continue;
+
+            CPoint places[MAX_PLACES];
+            const int placesCnt = bld->GetPlacesForTurrets(places);
+            if (placesCnt <= 0)
+                continue;
+
+            const CPoint place = places[(tick / 100) % placesCnt];
+
+            SCommand cmd;
+            ZeroMemory(&cmd, sizeof(cmd));
+            cmd.m_Type = CMD_BUILD_TURRET;
+            cmd.m_Side = s->m_Id;
+            cmd.m_ObjId = (int)bld->GetId();
+            cmd.m_Param[0] = 1 + (tick / 100) % CANNON_TYPE_CNT;
+            cmd.m_Param[1] = Float2Int(place.x * GLOBAL_SCALE_MOVE * 100.0f);
+            cmd.m_Param[2] = Float2Int(place.y * GLOBAL_SCALE_MOVE * 100.0f);
+            cmd.m_Param[3] = 0;
+            cmd.m_Param[4] = g_MatrixMap->m_RN.FindInPL(place);
+            CmdIssue(cmd);
+        }
+    }
+
     if ((tick % period) != 0)
         return;
 

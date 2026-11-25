@@ -624,38 +624,24 @@ void CMatrixSideUnit::OnLButtonDown(const CPoint &) {
     if (pObject == TRACE_STOP_NONE)
         return;
 
-    if(m_CurrentAction == BUILDING_TURRET && m_CannonForBuild.m_Cannon && m_CannonForBuild.m_CanBuildFlag/* && (m_CannonForBuild.m_ParentBuilding->m_TurretsHave < m_CannonForBuild.m_ParentBuilding->m_TurretsMax)*/){
+    if (m_CurrentAction == BUILDING_TURRET && m_CannonForBuild.m_Cannon &&
+        m_CannonForBuild.m_CanBuildFlag /* && (m_CannonForBuild.m_ParentBuilding->m_TurretsHave < m_CannonForBuild.m_ParentBuilding->m_TurretsMax)*/) {
         if (g_MatrixMap->IsPaused())
             return;
-        CMatrixCannon *ca = g_MatrixMap->StaticAdd<CMatrixCannon>(true);
-        ca->m_CurrState = CANNON_UNDER_CONSTRUCTION;
 
-        ca->SetInvulnerability();
-        ca->m_Pos.x = m_CannonForBuild.m_Cannon->m_Pos.x;  // g_MatrixMap->m_TraceStopPos.x;
-        ca->m_Pos.y = m_CannonForBuild.m_Cannon->m_Pos.y;  // g_MatrixMap->m_TraceStopPos.y;
-        ca->m_Place = m_CannonForBuild.m_Cannon->m_Place;
-        ca->SetSide(m_Id);
-        ca->UnitInit(m_CannonForBuild.m_Cannon->m_Num);
-
-        ca->m_Angle = m_CannonForBuild.m_Cannon->GetMustBeAngle();
-        ca->m_AddH = 0;
-
-        ca->m_ShadowType = SHADOW_STENCIL;
-        ca->m_ShadowSize = 128;
-
-        ca->RNeed(MR_Matrix | MR_Graph);
-        ca->m_ParentBuilding = (CMatrixBuilding *)m_ActiveObject;
-        ca->JoinToGroup();
-
-        m_CannonForBuild.m_ParentBuilding->m_TurretsHave++;
-        ca->SetHitPoint(0);
-        ((CMatrixBuilding *)m_ActiveObject)->m_BS.AddItem(ca);
-
-        AddResourceAmount(TITAN, -g_Config.m_CannonsProps[m_CannonForBuild.m_Cannon->m_Num - 1].m_Resources[TITAN]);
-        AddResourceAmount(ELECTRONICS,
-                          -g_Config.m_CannonsProps[m_CannonForBuild.m_Cannon->m_Num - 1].m_Resources[ELECTRONICS]);
-        AddResourceAmount(ENERGY, -g_Config.m_CannonsProps[m_CannonForBuild.m_Cannon->m_Num - 1].m_Resources[ENERGY]);
-        AddResourceAmount(PLASMA, -g_Config.m_CannonsProps[m_CannonForBuild.m_Cannon->m_Num - 1].m_Resources[PLASMA]);
+        // Сама пушка создаётся не здесь: клик ставит команду, а применяется она
+        // на такте N + лаг, одинаково на обеих машинах.
+        SCommand cmd;
+        ZeroMemory(&cmd, sizeof(cmd));
+        cmd.m_Type = CMD_BUILD_TURRET;
+        cmd.m_Side = m_Id;
+        cmd.m_ObjId = m_CannonForBuild.m_ParentBuilding ? (int)m_CannonForBuild.m_ParentBuilding->GetId() : -1;
+        cmd.m_Param[0] = m_CannonForBuild.m_Cannon->m_Num;
+        cmd.m_Param[1] = Float2Int(m_CannonForBuild.m_Cannon->m_Pos.x * 100.0f);
+        cmd.m_Param[2] = Float2Int(m_CannonForBuild.m_Cannon->m_Pos.y * 100.0f);
+        cmd.m_Param[3] = m_CannonForBuild.m_Cannon->GetMustBeAngle();
+        cmd.m_Param[4] = m_CannonForBuild.m_Cannon->m_Place;
+        CmdIssue(cmd);
 
         m_CurrentAction = NOTHING_SPECIAL;
         m_CannonForBuild.Delete();
