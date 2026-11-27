@@ -808,6 +808,18 @@ static bool CmdBotAll(void) {
     return v != 0;
 }
 
+// Наблюдатель: своих приказов не ставит вообще, только принимает чужие. Так
+// вторая машина может крутить ту же симуляцию и сверять хеши, не изобретая
+// команды (проверка «две симуляции в сети» без лобби).
+static bool CmdBotObserver(void) {
+    static int v = -1;
+    if (v < 0) {
+        const wchar_t *s = EnvStr(L"MATRIXGAME_NET_OBSERVER");
+        v = (s && s[0] != L'0') ? 1 : 0;
+    }
+    return v != 0;
+}
+
 void SimCommandBotTick(int tick) {
     const int period = CmdBotPeriod();
 
@@ -826,11 +838,28 @@ void SimCommandBotTick(int tick) {
         if (s->GetStatus() == SS_NONE || !s->m_HumanSide)
             continue;
 
-        const bool take =
-                NetIsActive() ? (s->m_Id == NetLocalSide()) : (CmdBotAll() || s == g_MatrixMap->GetPlayerSide());
+        bool take;
+        if (NetIsActive()) {
+            // За сторону партнёра не командуем никогда; свою — всегда; остальные
+            // человеческие — только если матч ведёт этот процесс (-CmdBotAll,
+            // например когда партнёр сидит наблюдателем).
+            if (s->m_Id == NetRemoteSide())
+                take = false;
+            else if (s->m_Id == NetLocalSide())
+                take = true;
+            else
+                take = CmdBotAll();
+        }
+        else {
+            take = CmdBotAll() || s == g_MatrixMap->GetPlayerSide();
+        }
+
         if (take)
             sideIdx[sideCnt++] = i;
     }
+
+    if (CmdBotObserver())
+        sideCnt = 0;  // наблюдатель ничего не придумывает, только принимает
 
     if (CmdReplayMode() || sideCnt <= 0)
         return;

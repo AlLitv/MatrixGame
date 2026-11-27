@@ -54,6 +54,7 @@ param(
     [string]$NetHashLog = "",
     [string]$NetPeer = "",
     [string]$NetSides = "",
+    [switch]$NetObserver,
     [string]$NetBind = "",
     [int]$WindowX = -100000,
     [int]$WindowY = 0,
@@ -81,6 +82,10 @@ $env:MATRIXGAME_MAP = $Map
 $env:MATRIXGAME_HASHLOG = Join-Path $logs "$Name.txt"
 $env:MATRIXGAME_OBJLOG = Join-Path $logs "$Name-obj.txt"
 $env:MATRIXGAME_TRACE = Join-Path $logs "$Name-trace.txt"
+
+# Stale files from a previous run of the same name would look like "the battle
+# already started" to the autostart loop below.
+Remove-Item $env:MATRIXGAME_HASHLOG, $env:MATRIXGAME_OBJLOG, $env:MATRIXGAME_TRACE -ErrorAction SilentlyContinue
 if ($NoDraw) { $env:MATRIXGAME_NODRAW = '1' } else { Remove-Item Env:\MATRIXGAME_NODRAW -ErrorAction SilentlyContinue }
 if ($HashStep -gt 0) { $env:MATRIXGAME_HASHSTEP = "$HashStep" } else { Remove-Item Env:\MATRIXGAME_HASHSTEP -ErrorAction SilentlyContinue }
 if ($RandLog) {
@@ -132,6 +137,7 @@ else {
 
 if ($NetPeer) { $env:MATRIXGAME_NET_PEER = $NetPeer } else { Remove-Item Env:\MATRIXGAME_NET_PEER -ErrorAction SilentlyContinue }
 if ($NetSides) { $env:MATRIXGAME_NET_SIDES = $NetSides } else { Remove-Item Env:\MATRIXGAME_NET_SIDES -ErrorAction SilentlyContinue }
+if ($NetObserver) { $env:MATRIXGAME_NET_OBSERVER = '1' } else { Remove-Item Env:\MATRIXGAME_NET_OBSERVER -ErrorAction SilentlyContinue }
 if ($NetBind) { $env:MATRIXGAME_NET_BIND = $NetBind } else { Remove-Item Env:\MATRIXGAME_NET_BIND -ErrorAction SilentlyContinue }
 
 # The net world hash is written even without a socket, so an offline run gives the
@@ -151,6 +157,7 @@ if ($CmdReplay) { "commands : replay from $($env:MATRIXGAME_CMDREPLAY)" }
 if ($Net) { "net      : udp $NetPort, local side $NetLocalSide, log $netLogPath" }
 if ($NetPeer) { "net peer : $NetPeer" }
 if ($NetSides) { "net sides: $NetSides (human-controlled)" }
+if ($NetObserver) { "net      : observer mode, no local commands" }
 if ($NetBind) { "net bind : $NetBind" }
 if ($netHashPath) { "nethash  : $netHashPath" }
 
@@ -254,8 +261,28 @@ public class SimClick {
         Start-Sleep -Milliseconds 600
     }
 
-    ClickAt 0.0438 0.948   # "planetary battles"
-    ClickAt 0.5902 0.6493  # "START" in the map list
+    # The menu sometimes takes longer than 15 s to draw, and then the clicks land
+    # on the loading screen and nothing happens. Click, wait for the harness trace
+    # (it is written as soon as the battle starts) and try again if needed.
+    $tracePath = $env:MATRIXGAME_TRACE
+    $started = $false
+    for ($attempt = 0; $attempt -lt 6 -and -not $started; $attempt++) {
+        if ($attempt -gt 0) { Start-Sleep -Seconds 4 }
+
+        ClickAt 0.0438 0.948   # "planetary battles"
+        Start-Sleep -Milliseconds 900
+        ClickAt 0.5902 0.6493  # "START" in the map list
+
+        if (-not $tracePath) { $started = $true; break }
+
+        for ($i = 0; $i -lt 24; $i++) {
+            Start-Sleep -Milliseconds 500
+            $proc.Refresh()
+            if ($proc.HasExited) { break }
+            if (Test-Path $tracePath) { $started = $true; break }
+        }
+        if (-not $started) { "autostart: attempt $($attempt + 1) did not start the battle, retrying" }
+    }
 }
 
 if (-not $proc.WaitForExit($TimeoutSec * 1000)) {

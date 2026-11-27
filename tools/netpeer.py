@@ -64,7 +64,7 @@ TYPES = {
 TICK_MS = 10
 
 
-def parse_cmdlog(path):
+def parse_cmdlog(path, sort=True):
     """Читает лог команд: по строке на команду, ключи key=value."""
     cmds = []
     with open(path, 'r', encoding='utf-8', errors='replace') as f:
@@ -91,7 +91,8 @@ def parse_cmdlog(path):
                 'sel': sel,
                 'p': params,
             })
-    cmds.sort(key=lambda c: (c['tick'], c['seq']))
+    if sort:
+        cmds.sort(key=lambda c: (c['tick'], c['seq']))
     return cmds
 
 
@@ -160,7 +161,15 @@ class Peer(object):
         self.ref = parse_ref(args.ref) if args.ref else {}
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind(('127.0.0.1', args.local_port))
+        # Порт может быть ещё занят предыдущим прогоном: ждём, пока отпустят.
+        for attempt in range(30):
+            try:
+                self.sock.bind(('127.0.0.1', args.local_port))
+                break
+            except OSError:
+                if attempt == 29:
+                    raise
+                time.sleep(1.0)
         self.sock.setblocking(False)
         self.host = ('127.0.0.1', args.port)
 
@@ -398,7 +407,7 @@ class Peer(object):
             return 0
 
         # Лог хоста читаем только сейчас: он пишется, пока идёт матч.
-        expect = parse_cmdlog(self.expect_path)
+        expect = parse_cmdlog(self.expect_path, sort=False)
         print('host log %s: %d commands' % (self.expect_path, len(expect)))
 
         ok = 0

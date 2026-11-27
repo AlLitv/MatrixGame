@@ -831,8 +831,12 @@ bool NetCanAdvance(int tick) {
 void NetSendCommand(const SCommand &cmd) {
     if (!g_Active || g_Stopped)
         return;
-    if (cmd.m_Side != g_LocalSide)
-        return;  // чужие приказы обратно не отправляем
+
+    // Приказы партнёра обратно не отправляем. Остальное уходит: в режиме, где
+    // один процесс командует обеими сторонами (-CmdBotAll), наблюдатель должен
+    // получить и их тоже, иначе его мир разъедется.
+    if (cmd.m_Side == g_PeerSide && g_PeerSide >= 0)
+        return;
 
     g_PendingCmds.push_back(cmd);
     g_StateDirty = true;

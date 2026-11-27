@@ -381,6 +381,39 @@ void CmdApplyTurret(CMatrixSideUnit *su, const SCommand &c) {
     parent->m_BS.AddItem(ca);
 }
 
+// Приказ на движение для леталок. Раньше это делал обработчик клика в кадре, и
+// там же тратились числа логического ГПСЧ (разброс цели), из-за чего движение
+// леталок зависело от частоты кадров. Теперь — на такте применения.
+void CmdOrderFlyers(const SCommand &c) {
+    int flyers = 0;
+    for (int k = 0; k < c.m_SelCnt; ++k) {
+        CMatrixMapStatic *o = CmdFindObject(c.m_Sel[k]);
+        if (o && o->IsFlyer())
+            ++flyers;
+    }
+    if (flyers <= 0)
+        return;
+
+    // Разброс тем шире, чем больше леталок в группе (как в прежнем коде).
+    int param = flyers - 1;
+    if (param > 4)
+        param = 4;
+
+    const float cx = (float)c.m_X * GLOBAL_SCALE_MOVE;
+    const float cy = (float)c.m_Y * GLOBAL_SCALE_MOVE;
+
+    for (int k = 0; k < c.m_SelCnt; ++k) {
+        CMatrixMapStatic *o = CmdFindObject(c.m_Sel[k]);
+        if (!o || !o->IsFlyer())
+            continue;
+
+        const float x = (float)g_MatrixMap->RndFloat(cx - param * GLOBAL_SCALE_MOVE, cx + param * GLOBAL_SCALE_MOVE);
+        const float y = (float)g_MatrixMap->RndFloat(cy - param * GLOBAL_SCALE_MOVE, cy + param * GLOBAL_SCALE_MOVE);
+
+        o->AsFlyer()->SetTarget(D3DXVECTOR2(x, y));
+    }
+}
+
 void CmdApply(const SCommand &c) {
     if (!g_MatrixMap)
         return;
@@ -397,6 +430,10 @@ void CmdApply(const SCommand &c) {
         CmdApplyTurret(su, c);
         return;
     }
+
+    // Леталки двигаются помимо групп роботов: у них своя цель и свой разброс.
+    if (c.m_Type == CMD_MOVE_TO)
+        CmdOrderFlyers(c);
 
     int no = CmdAssignGroup(su, c);
     if (no < 0)
@@ -700,7 +737,11 @@ int CmdCaptureSelection(CMatrixSideUnit *su, SCommand &cmd) {
 
     for (CMatrixGroupObject *obj = group->m_FirstObject; obj && cmd.m_SelCnt < CMD_SEL_MAX; obj = obj->m_NextObject) {
         CMatrixMapStatic *o = obj->GetObject();
-        if (o && o->IsLiveRobot() && o->GetSide() == su->m_Id)
+        if (!o || o->GetSide() != su->m_Id)
+            continue;
+        // Леталки тоже попадают в выделение: приказ на движение назначает им
+        // цель, а группу роботов из них всё равно не соберёшь.
+        if (o->IsLiveRobot() || o->IsFlyer())
             cmd.m_Sel[cmd.m_SelCnt++] = (int)o->GetId();
     }
 

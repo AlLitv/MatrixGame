@@ -675,21 +675,9 @@ void CMatrixSideUnit::OnLButtonDown(const CPoint &) {
             CmdOrder(this, CMD_MOVE_TO,
                      CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2), NULL);
 
-            CMatrixGroup *group = GetCurGroup();
-            CMatrixGroupObject *objs = group->m_FirstObject;
-            while (objs) {
-                if (objs->GetObject() && objs->GetObject()->GetObjectType() == OBJECT_TYPE_FLYER) {
-                    int param = (group->GetObjectsCnt() - group->GetRobotsCnt()) - 1;
-                    if (param > 4)
-                        param = 4;
-                    float x = (float)g_MatrixMap->RndFloat(g_MatrixMap->m_TraceStopPos.x - param * GLOBAL_SCALE_MOVE,
-                                                           g_MatrixMap->m_TraceStopPos.x + param * GLOBAL_SCALE_MOVE);
-                    float y = (float)g_MatrixMap->RndFloat(g_MatrixMap->m_TraceStopPos.y - param * GLOBAL_SCALE_MOVE,
-                                                           g_MatrixMap->m_TraceStopPos.y + param * GLOBAL_SCALE_MOVE);
-                    ((CMatrixFlyer *)objs->GetObject())->SetTarget(D3DXVECTOR2(x, y));
-                }
-                objs = objs->m_NextObject;
-            }
+            // Леталки получают цель внутри CmdApply (на такте применения): там же
+            // считается и разброс, иначе числа логического ГПСЧ тратились бы в
+            // кадре и зависели от частоты кадров.
         }
         else if (FLAG(g_IFaceList->m_IfListFlags, PREORDER_FIRE)) {
             // Fire
@@ -845,24 +833,9 @@ void CMatrixSideUnit::OnRButtonDown(const CPoint &) {
             CmdOrderObject(this, CMD_ATTACK, pObject);
         }
         else if (pObject == TRACE_STOP_LANDSCAPE || pObject == TRACE_STOP_WATER || (IS_TRACE_STOP_OBJECT(pObject))) {
-            // MoveTo
+            // MoveTo: цель леталкам назначает CmdApply (на такте применения).
             CmdOrder(this, CMD_MOVE_TO,
                      CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2), NULL);
-
-            CMatrixGroupObject *objs = GetCurGroup()->m_FirstObject;
-            while (objs) {
-                if (objs->GetObject() && objs->GetObject()->GetObjectType() == OBJECT_TYPE_FLYER) {
-                    int param = (GetCurGroup()->GetObjectsCnt() - GetCurGroup()->GetRobotsCnt()) - 1;
-                    if (param > 4)
-                        param = 4;
-                    float x = (float)g_MatrixMap->RndFloat(g_MatrixMap->m_TraceStopPos.x - param * GLOBAL_SCALE_MOVE,
-                                                           g_MatrixMap->m_TraceStopPos.x + param * GLOBAL_SCALE_MOVE);
-                    float y = (float)g_MatrixMap->RndFloat(g_MatrixMap->m_TraceStopPos.y - param * GLOBAL_SCALE_MOVE,
-                                                           g_MatrixMap->m_TraceStopPos.y + param * GLOBAL_SCALE_MOVE);
-                    ((CMatrixFlyer *)objs->GetObject())->SetTarget(D3DXVECTOR2(x, y));
-                }
-                objs = objs->m_NextObject;
-            }
         }
     }
 }
