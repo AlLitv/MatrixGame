@@ -219,6 +219,23 @@ void MatrixGameInit(HINSTANCE inst, HWND wnd, wchar *map, SRobotsSettings *set, 
         RndSetMatchSeed(seed);
     }
 
+    // Лобби: если сетевой матч начинается с обмена параметрами, карта и сид
+    // приходят от хоста. Делается до загрузки карты — иначе у машин будут
+    // разные миры, и это выглядит как десинк на пустом месте.
+    if (NetLobbyActive()) {
+        static wchar lobbyMap[260];
+        unsigned lobbySeed = RndMatchSeed();
+
+        if (NetLobbyRun(map, lobbySeed, lobbyMap, 260, &lobbySeed)) {
+            if (lobbyMap[0])
+                map = lobbyMap;
+            RndSetMatchSeed(lobbySeed);
+#ifdef MATRIXGAME_SIM_HARNESS
+            SimTrace("lobby: match parameters applied");
+#endif
+        }
+    }
+
 #ifdef MATRIXGAME_SIM_HARNESS
     {
         // Для сравнения прогонов карта должна быть одна и та же независимо

@@ -42,6 +42,8 @@ CMD = 3
 ACK = 4
 READY = 5
 HASH = 6
+MATCH = 7        # host -> client: seed, sides mask, map name
+MATCH_ACK = 8    # client -> host: parameters accepted
 
 HDR = struct.Struct('<IHHI')
 CMD_HEAD = struct.Struct('<II')
@@ -268,7 +270,18 @@ class Peer(object):
             self.handle(mtype, body)
 
     def handle(self, mtype, body):
-        if mtype == HELLO_ACK:
+        if mtype == MATCH:
+            # Лобби: хост присылает параметры матча до загрузки карты.
+            seed, sides, map_len = struct.unpack('<IIH', body[:10])
+            name = body[10:10 + map_len].decode('cp1251', 'replace')
+            print('lobby: seed=%d sides=0x%x map=%r' % (seed, sides, name))
+            self.args.seed = seed
+            self.lobby_sides = sides
+            self.send(MATCH_ACK, b'')
+            self.handshaked = True
+            if self.args.echo:
+                self.send(READY, struct.pack('<i', self.end_tick))
+        elif mtype == HELLO_ACK:
             ok, seed, period, lag = struct.unpack('<IIII', body[:16])
             if ok:
                 if not self.handshaked:
@@ -509,6 +522,8 @@ def main():
     ap.add_argument('--loss', type=float, default=0.0, help='link emulation: drop this fraction of outgoing packets')
     ap.add_argument('--loss-in', type=float, default=0.0, help='link emulation: drop this fraction of incoming packets')
     ap.add_argument('--link-seed', type=int, default=1, help='seed for the link emulation (repeatable runs)')
+    ap.add_argument('--lobby', type=int, default=0,
+                    help='first take match parameters (seed/map/sides) from the host, like a real client')
     ap.add_argument('--timeout', type=float, default=300.0)
     args = ap.parse_args()
 

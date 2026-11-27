@@ -39,6 +39,10 @@ enum ENetMsg {
     NET_ACK = 4,
     NET_READY = 5,
     NET_HASH = 6,
+    // Лобби: хост присылает сид, маску человеческих сторон и имя карты
+    // (u32 seed, u32 sides, u16 len, char map[len]); клиент отвечает MATCH_ACK.
+    NET_MATCH = 7,
+    NET_MATCH_ACK = 8,
 };
 
 #define NET_MAX_PACKET 2048
@@ -116,10 +120,20 @@ struct SHashSlot {
 
 SOCKET g_Sock = INVALID_SOCKET;
 bool g_WsaStarted = false;
+bool g_SockOpen = false;
 bool g_Active = false;
 bool g_Connected = false;
 bool g_Stopped = false;
 bool g_InitDone = false;
+
+// Лобби: параметры матча (сид, карта, стороны) до загрузки карты. Хост их
+// рассылает, клиент применяет — иначе карту и сид каждой машине приходилось бы
+// задавать вручную, а расхождение карт давало бы «непонятный» десинк.
+bool g_LobbyDone = false;
+unsigned g_LobbySeed = 0;
+unsigned g_LobbySidesMask = 0;
+bool g_LobbyHasMap = false;
+char g_LobbyMapName[128] = {0};
 
 sockaddr_in g_Peer;
 bool g_PeerKnown = false;
@@ -629,6 +643,282 @@ int NetLocalSide(void) {
     return g_LocalSide;
 }
 
+// Разбор MATRIXGAME_NET_PEER=ip:port (нужен и лобби, и NetInit).
+static void ParsePeerEnv(void) {
+    const wchar_t *peerW = EnvStr(L"MATRIXGAME_NET_PEER");
+    if (!peerW)
+        return;
+
+    char peerBuf[128];
+    peerBuf[0] = 0;
+    WideCharToMultiByte(CP_ACP, 0, peerW, -1, peerBuf, sizeof(peerBuf), NULL, NULL);
+
+    char host[64];
+    int port = 0;
+    host[0] = 0;
+    if (sscanf(peerBuf, "%63[^:]:%d", host, &port) >= 1 && host[0]) {
+        if (port <= 0)
+            port = 27777;
+        ZeroMemory(&g_Peer, sizeof(g_Peer));
+        g_Peer.sin_family = AF_INET;
+        g_Peer.sin_port = htons((unsigned short)port);
+        g_Peer.sin_addr.s_addr = inet_addr(host);
+        g_PeerKnown = true;
+        g_PeerConfigured = true;
+    }
+}
+
+bool NetLobbyActive(void) {
+    const wchar_t *v = EnvStr(L"MATRIXGAME_NET_LOBBY");
+    return v && v[0] != L'0';
+}
+
+// Лог открывается один раз и как можно раньше: лобби идёт до загрузки карты, и
+// без этого его строки уходили бы в никуда (файл открывался позже).
+static void NetOpenLog(void) {
+    if (g_Log)
+        return;
+
+    const wchar_t *logPath = EnvStr(L"MATRIXGAME_NETLOG");
+    if (!logPath)
+        return;
+
+    g_Log = _wfopen(logPath, L"wt");
+    if (!g_Log)
+        return;
+
+    fprintf(g_Log, "# MatrixGame net log\n");
+    fprintf(g_Log, "# local side=%d seed=%u\n", EnvInt(L"MATRIXGAME_NET_LOCAL_SIDE", 0), RndMatchSeed());
+    fflush(g_Log);
+}
+
+bool NetLobbyDone(void) {
+    return g_LobbyDone;
+}
+
+unsigned NetLobbySeed(void) {
+    return g_LobbySeed;
+}
+
+unsigned NetLobbySidesMask(void) {
+    return g_LobbySidesMask;
+}
+
+const char *NetLobbyMapName(void) {
+    return g_LobbyHasMap ? g_LobbyMapName : NULL;
+}
+
+// Открывает сокет так же, как это делал NetInit (тот потом его переиспользует).
+static bool LobbyOpenSocket(void) {
+    if (g_SockOpen)
+        return true;
+
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(1, 1), &wsa) != 0) {
+        Log("lobby: WSAStartup failed");
+        return false;
+    }
+    g_WsaStarted = true;
+
+    g_Sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (g_Sock == INVALID_SOCKET) {
+        Log("lobby: socket() failed: %d", WSAGetLastError());
+        return false;
+    }
+
+    sockaddr_in addr;
+    ZeroMemory(&addr, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((unsigned short)EnvInt(L"MATRIXGAME_NET_PORT", 27777));
+
+    char bindAddr[64];
+    bindAddr[0] = 0;
+    const wchar_t *bindW = EnvStr(L"MATRIXGAME_NET_BIND");
+    if (bindW)
+        WideCharToMultiByte(CP_ACP, 0, bindW, -1, bindAddr, sizeof(bindAddr), NULL, NULL);
+    if (bindAddr[0] == 0)
+        strcpy(bindAddr, "127.0.0.1");
+    addr.sin_addr.s_addr = inet_addr(bindAddr);
+
+    if (bind(g_Sock, (sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
+        Log("lobby: bind() failed: %d", WSAGetLastError());
+        closesocket(g_Sock);
+        g_Sock = INVALID_SOCKET;
+        return false;
+    }
+
+    u_long mode = 1;
+    ioctlsocket(g_Sock, FIONBIO, &mode);
+
+    g_SockOpen = true;
+    Log("lobby: socket on %s:%d", bindAddr, EnvInt(L"MATRIXGAME_NET_PORT", 27777));
+    return true;
+}
+
+// Маска «человеческих» сторон из MATRIXGAME_NET_SIDES ("1,2").
+static unsigned SidesMaskFromEnv(void) {
+    unsigned mask = 0;
+    const wchar_t *sides = EnvStr(L"MATRIXGAME_NET_SIDES");
+    if (!sides)
+        return 0;
+
+    for (const wchar_t *p = sides; *p;) {
+        while (*p == L' ' || *p == L',')
+            ++p;
+        if (!*p)
+            break;
+        const int id = _wtoi(p);
+        if (id > 0 && id < 32)
+            mask |= 1u << id;
+        while (*p && *p != L',')
+            ++p;
+    }
+    return mask;
+}
+
+// Лобби до загрузки карты. Возвращает true, если параметры известны (хост всегда
+// отдаёт свои, клиент получает их от хоста). mapOut получает имя карты от хоста.
+bool NetLobbyRun(const wchar_t *mapIn, unsigned seedIn, wchar_t *mapOut, int mapOutCnt, unsigned *seedOut) {
+    const int localSide = EnvInt(L"MATRIXGAME_NET_LOCAL_SIDE", 0);
+    g_LobbyDone = false;
+    g_LobbySeed = seedIn;
+    g_LobbySidesMask = SidesMaskFromEnv();
+    g_LobbyHasMap = false;
+
+    if (mapOut && mapOutCnt > 0)
+        mapOut[0] = 0;
+
+    // Своё имя карты — в UTF-8, чтобы ушло по сети.
+    char myMap[128];
+    myMap[0] = 0;
+    if (mapIn)
+        WideCharToMultiByte(CP_ACP, 0, mapIn, -1, myMap, sizeof(myMap), NULL, NULL);
+
+    if (!NetLobbyActive()) {
+        return false;
+    }
+
+    NetOpenLog();
+    ParsePeerEnv();
+    if (!LobbyOpenSocket())
+        return false;
+
+    const unsigned long long start = NowMs();
+    const int waitMs = EnvInt(L"MATRIXGAME_NET_WAIT_MS", 60000);
+    unsigned long long lastHello = 0;
+
+    Log("lobby: %s, waiting up to %d ms", g_PeerConfigured ? "client" : "host", waitMs);
+
+    for (;;) {
+        if (waitMs > 0 && NowMs() - start > (unsigned long long)waitMs) {
+            Log("lobby: peer did not show up, continuing with local settings");
+            return false;
+        }
+
+        // Клиент сам представляется, пока не получит MATCH.
+        if (g_PeerConfigured && NowMs() - lastHello >= 200) {
+            lastHello = NowMs();
+            SBuf b;
+            b.Reset();
+            b.U32((unsigned)localSide);
+            b.U32(0);  // сид ещё неизвестен — его назначит хост
+            SendRaw(NET_HELLO, b.m_Data, b.m_Len);
+        }
+
+        // Приём
+        for (;;) {
+            unsigned char packet[NET_MAX_PACKET];
+            sockaddr_in from;
+            int fromLen = sizeof(from);
+            const int got = recvfrom(g_Sock, (char *)packet, sizeof(packet), 0, (sockaddr *)&from, &fromLen);
+            if (got == SOCKET_ERROR)
+                break;
+            ++g_RecvPackets;
+            if (got < (int)sizeof(SNetHeader))
+                continue;
+
+            SNetHeader h;
+            memcpy(&h, packet, sizeof(h));
+            if (h.m_Magic != NET_MAGIC || h.m_Version != NET_VERSION)
+                continue;
+
+            const unsigned char *body = packet + sizeof(h);
+
+            if (h.m_Type == NET_HELLO && !g_PeerConfigured) {
+                // Хост: запоминаем клиента и отдаём параметры матча.
+                g_Peer = from;
+                g_PeerKnown = true;
+
+                SReader r;
+                r.m_Data = body;
+                r.m_Len = (int)h.m_Len;
+                r.m_Pos = 0;
+                if (r.Has(8)) {
+                    const int side = (int)r.U32();
+                    g_PeerSide = side;
+                }
+
+                SBuf b;
+                b.Reset();
+                b.U32(g_LobbySeed);
+                b.U32(g_LobbySidesMask);
+                const unsigned mapLen = (unsigned)strlen(myMap);
+                b.U16(mapLen);
+                for (unsigned i = 0; i < mapLen; ++i)
+                    b.m_Data[b.m_Len++] = (unsigned char)myMap[i];
+                SendRaw(NET_MATCH, b.m_Data, b.m_Len);
+
+                if (mapOut && mapOutCnt > 0 && myMap[0])
+                    MultiByteToWideChar(CP_ACP, 0, myMap, -1, mapOut, mapOutCnt);
+                g_LobbyHasMap = myMap[0] != 0;
+                strcpy(g_LobbyMapName, myMap);
+
+                *seedOut = g_LobbySeed;
+                g_Connected = true;
+                g_Active = true;
+                g_LobbyDone = true;
+                Log("lobby: client connected (side %d), match sent (seed %u, sides 0x%x)", g_PeerSide, g_LobbySeed,
+                    g_LobbySidesMask);
+                return true;
+            }
+
+            if (h.m_Type == NET_MATCH && g_PeerConfigured) {
+                SReader r;
+                r.m_Data = body;
+                r.m_Len = (int)h.m_Len;
+                r.m_Pos = 0;
+                if (!r.Has(10))
+                    continue;
+
+                g_LobbySeed = r.U32();
+                g_LobbySidesMask = r.U32();
+                const unsigned mapLen = r.U16();
+                char mapName[128];
+                unsigned n = 0;
+                for (; n < mapLen && n < sizeof(mapName) - 1 && r.Has(1); ++n)
+                    mapName[n] = (char)r.m_Data[r.m_Pos++];
+                mapName[n] = 0;
+
+                if (mapOut && mapOutCnt > 0 && mapName[0])
+                    MultiByteToWideChar(CP_ACP, 0, mapName, -1, mapOut, mapOutCnt);
+                g_LobbyHasMap = mapName[0] != 0;
+                strcpy(g_LobbyMapName, mapName);
+
+                *seedOut = g_LobbySeed;
+                g_Active = true;
+                g_Connected = true;
+                g_LobbyDone = true;
+
+                SBuf ack;
+                ack.Reset();
+                SendRaw(NET_MATCH_ACK, ack.m_Data, 0);
+                Log("lobby: match from host (seed %u, sides 0x%x, map '%s')", g_LobbySeed, g_LobbySidesMask, mapName);
+                return true;
+            }
+        }
+    }
+}
+
 void NetInit(void) {
     if (g_InitDone)
         return;
@@ -680,6 +970,17 @@ void NetInit(void) {
         }
     }
 
+    // Лобби главнее переменной окружения: набор сторон задаёт хост матча, а не
+    // каждая машина по-своему.
+    if (g_LobbyDone && g_LobbySidesMask && g_MatrixMap) {
+        for (int i = 0; i < g_MatrixMap->m_SideCnt; ++i) {
+            const int id = g_MatrixMap->m_Side[i].m_Id;
+            const bool human = (id > 0 && id < 32) && ((g_LobbySidesMask >> id) & 1) != 0;
+            g_MatrixMap->m_Side[i].m_HumanSide = human;
+        }
+        Log("lobby: human sides from the host: 0x%x", g_LobbySidesMask);
+    }
+
     // Своя сторона: камера, выделение и панели должны смотреть на ту сторону,
     // которой управляет этот игрок. Без этого второй человек видит интерфейс
     // первой стороны и не может ничем командовать.
@@ -699,76 +1000,55 @@ void NetInit(void) {
     if (!netEnabled)
         return;
 
-    // MATRIXGAME_NET_PEER=ip:port — этот процесс сам стучится к партнёру.
-    const wchar_t *peerW = EnvStr(L"MATRIXGAME_NET_PEER");
-    if (peerW) {
-        char peerBuf[128];
-        peerBuf[0] = 0;
-        WideCharToMultiByte(CP_ACP, 0, peerW, -1, peerBuf, sizeof(peerBuf), NULL, NULL);
+    ParsePeerEnv();
 
-        char host[64];
-        int port = 0;
-        host[0] = 0;
-        if (sscanf(peerBuf, "%63[^:]:%d", host, &port) >= 1 && host[0]) {
-            if (port <= 0)
-                port = 27777;
-            ZeroMemory(&g_Peer, sizeof(g_Peer));
-            g_Peer.sin_family = AF_INET;
-            g_Peer.sin_port = htons((unsigned short)port);
-            g_Peer.sin_addr.s_addr = inet_addr(host);
-            g_PeerKnown = true;
-            g_PeerConfigured = true;
+    NetOpenLog();
+
+    // Сокет уже открыт лобби (см. NetLobbyRun) — второй раз не открываем и не
+    // перебиндимся: иначе порт занят и партнёр нас не найдёт.
+    if (!g_SockOpen) {
+        WSADATA wsa;
+        if (WSAStartup(MAKEWORD(1, 1), &wsa) != 0) {
+            Log("WSAStartup failed");
+            return;
         }
-    }
+        g_WsaStarted = true;
 
-    const wchar_t *logPath = EnvStr(L"MATRIXGAME_NETLOG");
-    if (logPath) {
-        g_Log = _wfopen(logPath, L"wt");
-        if (g_Log) {
-            fprintf(g_Log, "# MatrixGame net log\n");
-            fprintf(g_Log, "# local side=%d seed=%u\n", g_LocalSide, RndMatchSeed());
-            fflush(g_Log);
+        g_Sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (g_Sock == INVALID_SOCKET) {
+            Log("socket() failed: %d", WSAGetLastError());
+            return;
         }
+
+        sockaddr_in addr;
+        ZeroMemory(&addr, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons((unsigned short)EnvInt(L"MATRIXGAME_NET_PORT", 27777));
+
+        // По умолчанию слушаем только localhost: тестовый прогон не должен светить
+        // сокет в сеть. Для игры между машинами задаётся MATRIXGAME_NET_BIND.
+        char bindAddr[64];
+        bindAddr[0] = 0;
+        const wchar_t *bindW = EnvStr(L"MATRIXGAME_NET_BIND");
+        if (bindW)
+            WideCharToMultiByte(CP_ACP, 0, bindW, -1, bindAddr, sizeof(bindAddr), NULL, NULL);
+        if (bindAddr[0] == 0)
+            strcpy(bindAddr, "127.0.0.1");
+        addr.sin_addr.s_addr = inet_addr(bindAddr);
+
+        if (bind(g_Sock, (sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
+            Log("bind() failed: %d", WSAGetLastError());
+            closesocket(g_Sock);
+            g_Sock = INVALID_SOCKET;
+            return;
+        }
+
+        u_long mode = 1;
+        ioctlsocket(g_Sock, FIONBIO, &mode);
+
+        g_SockOpen = true;
+        Log("listening on %s:%d", bindAddr, EnvInt(L"MATRIXGAME_NET_PORT", 27777));
     }
-
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(1, 1), &wsa) != 0) {
-        Log("WSAStartup failed");
-        return;
-    }
-    g_WsaStarted = true;
-
-    g_Sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (g_Sock == INVALID_SOCKET) {
-        Log("socket() failed: %d", WSAGetLastError());
-        return;
-    }
-
-    sockaddr_in addr;
-    ZeroMemory(&addr, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((unsigned short)EnvInt(L"MATRIXGAME_NET_PORT", 27777));
-
-    // По умолчанию слушаем только localhost: тестовый прогон не должен светить
-    // сокет в сеть. Для игры между машинами задаётся MATRIXGAME_NET_BIND.
-    char bindAddr[64];
-    bindAddr[0] = 0;
-    const wchar_t *bindW = EnvStr(L"MATRIXGAME_NET_BIND");
-    if (bindW)
-        WideCharToMultiByte(CP_ACP, 0, bindW, -1, bindAddr, sizeof(bindAddr), NULL, NULL);
-    if (bindAddr[0] == 0)
-        strcpy(bindAddr, "127.0.0.1");
-    addr.sin_addr.s_addr = inet_addr(bindAddr);
-
-    if (bind(g_Sock, (sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
-        Log("bind() failed: %d", WSAGetLastError());
-        closesocket(g_Sock);
-        g_Sock = INVALID_SOCKET;
-        return;
-    }
-
-    u_long mode = 1;
-    ioctlsocket(g_Sock, FIONBIO, &mode);
 
     for (int i = 0; i < NET_RING; ++i) {
         g_Ring[i].m_Tick = -1;
@@ -776,7 +1056,6 @@ void NetInit(void) {
     }
 
     g_Active = true;
-    Log("listening on %s:%d", bindAddr, EnvInt(L"MATRIXGAME_NET_PORT", 27777));
 }
 
 void NetShutdown(void) {
@@ -805,6 +1084,12 @@ void NetShutdown(void) {
         WSACleanup();
         g_WsaStarted = false;
     }
+
+    // Следующий бой в этом же процессе должен открыть сокет и лобби заново.
+    g_SockOpen = false;
+    g_LobbyDone = false;
+    g_LobbyHasMap = false;
+    g_LobbyMapName[0] = 0;
 
     g_Active = false;
     g_Connected = false;

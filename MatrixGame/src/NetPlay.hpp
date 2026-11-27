@@ -33,6 +33,18 @@ int NetLocalSide(void);
 void NetInit(void);      // из MatrixGameInit, после CmdInit
 void NetShutdown(void);  // из MatrixGameDeinit
 
+// Лобби: обмен параметрами матча до загрузки карты (MATRIXGAME_NET_LOBBY=1).
+// Хост отдаёт свой сид, маску человеческих сторон и имя карты; клиент их
+// применяет — тогда карту и сид не надо вручную синхронизировать.
+bool NetLobbyActive(void);
+bool NetLobbyDone(void);
+unsigned NetLobbySeed(void);
+unsigned NetLobbySidesMask(void);
+const char *NetLobbyMapName(void);  // nullptr — карта не задана хостом
+// Вызывается из MatrixGameInit до загрузки карты. Возвращает true, если
+// параметры известны (хост — всегда свои). mapOut/seedOut получают значения.
+bool NetLobbyRun(const wchar_t *mapIn, unsigned seedIn, wchar_t *mapOut, int mapOutCnt, unsigned *seedOut);
+
 // Принять пакеты и отправить накопленное. Вызывается и в замороженном
 // состоянии: иначе из заморозки не выйти.
 void NetPump(void);

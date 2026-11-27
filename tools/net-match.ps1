@@ -43,6 +43,7 @@ param(
     [string]$Build = "",
     [switch]$InstallDll,
     [switch]$Bot,
+    [switch]$Lobby,
     [int]$TimeoutSec = 3600
 )
 
@@ -78,6 +79,8 @@ $common = @(
     '-TimeoutSec', "$TimeoutSec"
 )
 
+if ($Lobby) { $common += @('-NetLobby') }
+
 switch ($Role) {
     'host' {
         $args2 = $common + @('-NetBind', '0.0.0.0', '-NetPort', "$Port", '-NetLocalSide', '1')
@@ -88,7 +91,7 @@ switch ($Role) {
         else {
             $args2 += @('-CmdBot', '0')
         }
-        "role     : host (side 1), listening on 0.0.0.0:$Port$(if ($Bot) { ', bot plays both sides' } else { '' })"
+        "role     : host (side 1), listening on 0.0.0.0:$Port$(if ($Bot) { ', bot plays both sides' } else { '' })$(if ($Lobby) { ', lobby: map/seed/sides from this machine' } else { '' })"
         "peer     : waiting for a client, up to 60 s"
     }
     'client' {
