@@ -411,7 +411,7 @@ public:
         return m_CurrState == ROBOT_IN_SPAWN || m_CurrState == ROBOT_BASE_MOVEOUT || m_CurrState == ROBOT_BASE_CAPTURE;
     }
     bool CanBreakOrder(void) {
-        if (m_Side != PLAYER_SIDE || FLAG(g_MatrixMap->m_Flags, MMFLAG_FULLAUTO)) {
+        if (!g_MatrixMap->IsHumanSide(m_Side) || FLAG(g_MatrixMap->m_Flags, MMFLAG_FULLAUTO)) {
             CMatrixBuilding *cf = GetCaptureFactory();
             if (cf) {
                 return false;  // DO NOT BREAK CAPTURING!!!!!!!!!!!!!!!!!!!!!!!! NEVER!!!!!!!!!!

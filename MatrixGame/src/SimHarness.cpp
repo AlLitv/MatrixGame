@@ -718,11 +718,21 @@ void SimLogTakt(int step) {
                 if (g_MatrixMap->m_Side[i].GetStatus() == SS_ACTIVE)
                     ++active;
             }
-            fprintf(log, "t=%d objects=%d rand=%llu logic=%llu hash=%016llx rep=%d/%d/%d pst=%d act=%d bwd=%d xl=%d\n",
+
+            // Статусы всех сторон, а не только «стороны игрока»: в сети у двух
+            // машин своя сторона игрока, и поле не должно от неё зависеть.
+            char statuses[128];
+            statuses[0] = 0;
+            for (int i = 0; i < g_MatrixMap->m_SideCnt; ++i) {
+                char one[16];
+                sprintf(one, "%s%d", i ? "/" : "", (int)g_MatrixMap->m_Side[i].GetStatus());
+                strcat(statuses, one);
+            }
+
+            fprintf(log, "t=%d objects=%d rand=%llu logic=%llu hash=%016llx rep=%d/%d/%d pst=%s act=%d bwd=%d xl=%d\n",
                     time, objects, SimRandCalls(), SimLogicRandCalls(), hash, g_repairStats[SIMREP_ALLOC],
-                    g_repairStats[SIMREP_ENTER], g_repairStats[SIMREP_PASS],
-                    (int)g_MatrixMap->GetPlayerSide()->GetStatus(), active, g_MatrixMap->GetBeforeWinLooseCount(),
-                    FLAG(g_Flags, GFLAG_EXITLOOP) ? 1 : 0);
+                    g_repairStats[SIMREP_ENTER], g_repairStats[SIMREP_PASS], statuses, active,
+                    g_MatrixMap->GetBeforeWinLooseCount(), FLAG(g_Flags, GFLAG_EXITLOOP) ? 1 : 0);
             g_repairStats[SIMREP_ALLOC] = g_repairStats[SIMREP_ENTER] = g_repairStats[SIMREP_PASS] = 0;
             fflush(log);
         }

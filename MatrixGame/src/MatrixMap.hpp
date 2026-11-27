@@ -563,6 +563,7 @@ public:
 
     CMatrixSideUnit *GetSideById(int id);
     CMatrixSideUnit *GetPlayerSide(void) { return m_PlayerSide; };
+    bool IsHumanSide(int id) const;
 #ifdef MATRIXGAME_SIM_HARNESS
     // Счётчик тактов до выхода из боя: по нему видно, решила ли логика, что бой
     // закончен, или игру закрыл кто-то снаружи.
@@ -737,6 +738,20 @@ inline CMatrixSideUnit *CMatrixMap::GetSideById(int id) {
     debugbreak();
 #endif
     ERROR_E;
+}
+
+// Сторона под управлением человека. В одиночной игре это PLAYER_SIDE, в сетевом
+// матче — все стороны из MATRIXGAME_NET_SIDES. Правила, которые раньше были
+// «для игрока» (множитель урона, авто-захват, смена команды), должны применяться
+// ко всем людям одинаково, иначе второй игрок воюет по правилам ИИ.
+inline bool CMatrixMap::IsHumanSide(int id) const {
+    if (!m_Side)
+        return false;
+    for (int i = 0; i < m_SideCnt; i++) {
+        if (m_Side[i].m_Id == id)
+            return m_Side[i].m_HumanSide;
+    }
+    return false;
 }
 
 inline DWORD CMatrixMap::GetSideColor(int id) {

@@ -2761,6 +2761,13 @@ static bool Egg2(const D3DXVECTOR2 &center, CMatrixMapStatic *ms, DWORD user) {
 void CMatrixMapLogic::Takt(int step) {
     DTRACE();
 
+    // Всё до симуляции — интерфейс, камера, подсказки — это презентация, и её
+    // случайные числа не должны попадать в логический поток: иначе лишний звук
+    // выделения или подсказка игрока сдвигают последовательность ИИ, а в сети —
+    // рассинхронизируют машины (у каждой свой интерфейс). Переключаемся на
+    // визуальный поток и возвращаемся к логическому перед тактами мира.
+    RndSetDrawPhase(true);
+
 #ifdef MATRIXGAME_SIM_HARNESS
     SimLogTakt(step);
 #endif
@@ -3030,6 +3037,9 @@ void CMatrixMapLogic::Takt(int step) {
         m_TaktNext += LOGIC_TAKT_PERIOD;
         // CMatrixMapStatic::ProceedLogic(LOGIC_TAKT_PERIOD);
 
+        // Дальше идёт собственно мир — ему нужен логический поток ГПСЧ.
+        RndSetDrawPhase(false);
+
         // Слой команд: приказы игроков применяются в начале такта, до логики
         // сторон, поэтому порядок «приказ → его выполнение» одинаков у всех.
         CmdTick(m_TaktNext / LOGIC_TAKT_PERIOD);
@@ -3050,6 +3060,9 @@ void CMatrixMapLogic::Takt(int step) {
         }
     }
     DCP();
+
+    // Графический такт и камера — снова презентация, их ГПСЧ не логический.
+    RndSetDrawPhase(true);
 
     CMatrixMap::Takt(step);  // graphic takts after logic takt
 

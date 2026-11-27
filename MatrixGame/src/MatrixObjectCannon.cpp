@@ -1264,9 +1264,10 @@ bool CMatrixCannon::Damage(EWeapon weap, const D3DXVECTOR3 &pos, const D3DXVECTO
         return true;
 
     friendly_fire = (attacker_side != 0) && (attacker_side == m_Side);
-    float damagek =
-            (friendly_fire || m_Side != PLAYER_SIDE) ? 1.0f : g_MatrixMap->m_Difficulty.k_damage_enemy_to_player;
-    if (friendly_fire && m_Side == PLAYER_SIDE)
+    float damagek = (friendly_fire || !g_MatrixMap->IsHumanSide(m_Side))
+                            ? 1.0f
+                            : g_MatrixMap->m_Difficulty.k_damage_enemy_to_player;
+    if (friendly_fire && g_MatrixMap->IsHumanSide(m_Side))
         damagek = damagek * g_MatrixMap->m_Difficulty.k_friendly_fire;
 
     int idx = Weap2Index(weap);

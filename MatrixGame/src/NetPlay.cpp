@@ -680,6 +680,22 @@ void NetInit(void) {
         }
     }
 
+    // Своя сторона: камера, выделение и панели должны смотреть на ту сторону,
+    // которой управляет этот игрок. Без этого второй человек видит интерфейс
+    // первой стороны и не может ничем командовать.
+    if (g_MatrixMap && g_LocalSide > 0) {
+        CMatrixSideUnit *me = NULL;
+        for (int i = 0; i < g_MatrixMap->m_SideCnt; ++i) {
+            if (g_MatrixMap->m_Side[i].m_Id == g_LocalSide)
+                me = &g_MatrixMap->m_Side[i];
+        }
+        if (me && me != g_MatrixMap->GetPlayerSide()) {
+            me->InitPlayerSide();
+            g_MatrixMap->m_PlayerSide = me;
+            Log("local player side is %d", g_LocalSide);
+        }
+    }
+
     if (!netEnabled)
         return;
 

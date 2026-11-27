@@ -444,7 +444,7 @@ void CMatrixSideUnit::LogicTakt(int ms) {
     // одна и та же сторона обязана идти одной и той же веткой.
     const bool humanSide = m_HumanSide && !FLAG(g_MatrixMap->m_Flags, MMFLAG_AUTOMATIC_MODE);
     if (!humanSide) {
-        if (m_Id == PLAYER_SIDE) {
+        if (g_MatrixMap->IsHumanSide(m_Id)) {
             if (!g_MatrixMap->MaintenanceDisabled()) {
                 if (g_MatrixMap->BeforeMaintenanceTime() == 0 && (FRND(1) < 0.05f)) {
                     CMatrixMapStatic *b = NULL;
@@ -609,7 +609,7 @@ void CMatrixSideUnit::LogicTakt(int ms) {
 
 void CMatrixSideUnit::OnMouseMove() {
     DTRACE();
-    if (m_Id == PLAYER_SIDE && IsRobotMode() && g_IFaceList->m_InFocus != INTERFACE) {
+    if (g_MatrixMap->GetPlayerSide() == this && IsRobotMode() && g_IFaceList->m_InFocus != INTERFACE) {
         CMatrixRobotAI *robot = ((CMatrixRobotAI *)GetArcadedObject());
     }
 }
@@ -672,8 +672,8 @@ void CMatrixSideUnit::OnLButtonDown(const CPoint &) {
             // Move
             RESETFLAG(g_IFaceList->m_IfListFlags, PREORDER_MOVE | ORDERING_MODE);
 
-            CmdOrder(this, CMD_MOVE_TO,
-                     CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2), NULL);
+            CmdOrder(this, CMD_MOVE_TO, CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2),
+                     NULL);
 
             // Леталки получают цель внутри CmdApply (на такте применения): там же
             // считается и разброс, иначе числа логического ГПСЧ тратились бы в
@@ -689,13 +689,13 @@ void CMatrixSideUnit::OnLButtonDown(const CPoint &) {
             else {
                 RESETFLAG(g_IFaceList->m_IfListFlags, PREORDER_FIRE | ORDERING_MODE);
 
-                CmdOrder(this, CMD_ATTACK,
-                         CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2), NULL);
+                CmdOrder(this, CMD_ATTACK, CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2),
+                         NULL);
             }
         }
         else if (FLAG(g_IFaceList->m_IfListFlags, PREORDER_CAPTURE)) {
             // Capture
-            if (IS_TRACE_STOP_OBJECT(pObject) && pObject->IsLiveBuilding() && pObject->GetSide() != PLAYER_SIDE) {
+            if (IS_TRACE_STOP_OBJECT(pObject) && pObject->IsLiveBuilding() && pObject->GetSide() != m_Id) {
                 RESETFLAG(g_IFaceList->m_IfListFlags, PREORDER_CAPTURE | ORDERING_MODE);
 
                 CmdOrderObject(this, CMD_CAPTURE, pObject);
@@ -704,8 +704,8 @@ void CMatrixSideUnit::OnLButtonDown(const CPoint &) {
         else if (FLAG(g_IFaceList->m_IfListFlags, PREORDER_PATROL)) {
             // Patrol
             RESETFLAG(g_IFaceList->m_IfListFlags, PREORDER_PATROL | ORDERING_MODE);
-            CmdOrder(this, CMD_PATROL,
-                     CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2), NULL);
+            CmdOrder(this, CMD_PATROL, CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2),
+                     NULL);
         }
         else if (FLAG(g_IFaceList->m_IfListFlags, PREORDER_BOMB)) {
             // Nuclear BOMB!!! spasaisya kto mozhet!!! dab shas rvanet bombu!!!!
@@ -717,13 +717,13 @@ void CMatrixSideUnit::OnLButtonDown(const CPoint &) {
             else {
                 RESETFLAG(g_IFaceList->m_IfListFlags, PREORDER_BOMB | ORDERING_MODE);
 
-                CmdOrder(this, CMD_BOMB,
-                         CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2), NULL);
+                CmdOrder(this, CMD_BOMB, CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2),
+                         NULL);
             }
         }
         else if (FLAG(g_IFaceList->m_IfListFlags, PREORDER_REPAIR)) {
             // Repair our robots please
-            if (IS_TRACE_STOP_OBJECT(pObject) && pObject->IsLive() && pObject->GetSide() == PLAYER_SIDE) {
+            if (IS_TRACE_STOP_OBJECT(pObject) && pObject->IsLive() && pObject->GetSide() == m_Id) {
                 RESETFLAG(g_IFaceList->m_IfListFlags, PREORDER_REPAIR | ORDERING_MODE);
 
                 CmdOrderObject(this, CMD_REPAIR, pObject);
@@ -740,10 +740,10 @@ void CMatrixSideUnit::OnLButtonDouble(const CPoint &mouse) {
     CMatrixMapStatic *pObject = MouseToLand();
 
     if (pObject == TRACE_STOP_NONE ||
-        !(IS_TRACE_STOP_OBJECT(pObject) && pObject->IsLiveRobot() && pObject->GetSide() == PLAYER_SIDE))
+        !(IS_TRACE_STOP_OBJECT(pObject) && pObject->IsLiveRobot() && pObject->GetSide() == m_Id))
         return;
 
-    if (IS_TRACE_STOP_OBJECT(pObject) && pObject->IsLiveRobot() && pObject->GetSide() == PLAYER_SIDE) {
+    if (IS_TRACE_STOP_OBJECT(pObject) && pObject->IsLiveRobot() && pObject->GetSide() == m_Id) {
         D3DXVECTOR3 o_pos = pObject->GetGeoCenter();
         CMatrixMapStatic *st = CMatrixMapStatic::GetFirstLogic();
 
@@ -753,7 +753,7 @@ void CMatrixSideUnit::OnLButtonDouble(const CPoint &mouse) {
         }
 
         while (st) {
-            if (st->GetSide() == PLAYER_SIDE && st->IsLiveRobot()) {
+            if (st->GetSide() == m_Id && st->IsLiveRobot()) {
                 if (D3DXVec3LengthSq(&(o_pos - st->GetGeoCenter())) <=
                     FRIENDLY_SEARCH_RADIUS * FRIENDLY_SEARCH_RADIUS) {
                     GetCurSelGroup()->AddObject(st, -4);
@@ -834,8 +834,8 @@ void CMatrixSideUnit::OnRButtonDown(const CPoint &) {
         }
         else if (pObject == TRACE_STOP_LANDSCAPE || pObject == TRACE_STOP_WATER || (IS_TRACE_STOP_OBJECT(pObject))) {
             // MoveTo: цель леталкам назначает CmdApply (на такте применения).
-            CmdOrder(this, CMD_MOVE_TO,
-                     CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2), NULL);
+            CmdOrder(this, CMD_MOVE_TO, CPoint(mx - ROBOT_MOVECELLS_PER_SIZE / 2, my - ROBOT_MOVECELLS_PER_SIZE / 2),
+                     NULL);
         }
     }
 }
@@ -949,7 +949,7 @@ void CMatrixSideUnit::Select(ESelType type, CMatrixMapStatic *pObject) {
     }
 
     if (type == GROUP || type == FLYER || type == ROBOT) {
-        if (m_Id == PLAYER_SIDE) {
+        if (g_MatrixMap->IsHumanSide(m_Id)) {
             int rnd = g_MatrixMap->Rnd(0, 6);
             if (!rnd) {
                 CSound::Play(S_SELECTION_1, SL_SELECTION);
@@ -1016,8 +1016,7 @@ void CMatrixSideUnit::Select(ESelType type, CMatrixMapStatic *pObject) {
 
         ShowOrderState();
     }
-    else if (type == ARCADE) {
-    }
+    else if (type == ARCADE) {}
     else {
         m_nCurrRobotPos = -1;
         m_CurrSel = NOTHING_SELECTED;
@@ -1288,7 +1287,7 @@ void CMatrixSideUnit::SetArcadedObject(CMatrixMapStatic *o) {
         m_ArcadedP_available = 0;
     }
 
-    if (o && o->GetSide() != PLAYER_SIDE) {
+    if (o && o->GetSide() != m_Id) {
         return;
     }
     if (IsRobotMode()) {
@@ -1423,8 +1422,7 @@ void CMatrixSideUnit::SelectedGroupBreakOrders() {
         if (objs->GetObject()->GetObjectType() == OBJECT_TYPE_ROBOTAI) {
             ((CMatrixRobotAI *)objs->GetObject())->BreakAllOrders();
         }
-        else if (objs->GetObject()->GetObjectType() == OBJECT_TYPE_FLYER) {
-        }
+        else if (objs->GetObject()->GetObjectType() == OBJECT_TYPE_FLYER) {}
         objs = objs->m_NextObject;
     }
 }
@@ -1708,7 +1706,7 @@ void SideSelectionCallBack(CMatrixMapStatic *ms, DWORD param) {
     if (!ms ||
         (ms->GetObjectType() != OBJECT_TYPE_ROBOTAI && ms->GetObjectType() != OBJECT_TYPE_FLYER &&
          ms->GetObjectType() != OBJECT_TYPE_BUILDING) ||
-        ms->GetSide() != PLAYER_SIDE)
+        ms->GetSide() != g_MatrixMap->GetPlayerSide()->m_Id)
         return;
 
     if (ms->GetObjectType() == OBJECT_TYPE_ROBOTAI) {
@@ -2184,7 +2182,7 @@ void CMatrixSideUnit::EscapeFromBomb() {
         if (ms->GetSide() != m_Id)
             continue;
         CMatrixRobotAI *robot = ms->AsRobot();
-        if (m_Id == PLAYER_SIDE && robot->GetGroupLogic() >= 0 &&
+        if (g_MatrixMap->IsHumanSide(m_Id) && robot->GetGroupLogic() >= 0 &&
             m_PlayerGroup[robot->GetGroupLogic()].Order() < mpo_AutoCapture)
             continue;
 
@@ -2237,7 +2235,7 @@ void CMatrixSideUnit::EscapeFromBomb() {
         if (ms == skip_normal || ms == skip_withbomb)
             continue;
         CMatrixRobotAI *robot = ms->AsRobot();
-        if (m_Id == PLAYER_SIDE && robot->GetGroupLogic() >= 0 &&
+        if (g_MatrixMap->IsHumanSide(m_Id) && robot->GetGroupLogic() >= 0 &&
             m_PlayerGroup[robot->GetGroupLogic()].Order() < mpo_AutoCapture)
             continue;
 
@@ -2351,7 +2349,7 @@ void CMatrixSideUnit::GroupNoTeamRobot() {
     int g, i, u, cnt, sme;
     float cx, cy;
 
-    if (m_Id == PLAYER_SIDE)
+    if (g_MatrixMap->IsHumanSide(m_Id))
         return;
 
     for (i = 0; i < MAX_LOGIC_GROUP; i++)
@@ -2461,9 +2459,9 @@ void CMatrixSideUnit::CalcMaxSpeed() {
     }
 
     for (i = 0; i < MAX_LOGIC_GROUP; i++) {
-        if (m_Id == PLAYER_SIDE && m_PlayerGroup[i].m_RobotCnt <= 0)
+        if (g_MatrixMap->IsHumanSide(m_Id) && m_PlayerGroup[i].m_RobotCnt <= 0)
             continue;
-        else if (m_Id != PLAYER_SIDE && m_LogicGroup[i].RobotsCnt() <= 0)
+        else if (!g_MatrixMap->IsHumanSide(m_Id) && m_LogicGroup[i].RobotsCnt() <= 0)
             continue;
 
         float cx = 0.0f;
@@ -4345,9 +4343,9 @@ void CMatrixSideUnit::TaktHL() {
         // dword it2=timeGetTime();
         // DM(L"TaktHL",CWStr().Format(L"<i>",it2-it1).Get());
 
-        //#if (defined _DEBUG) &&  !(defined _RELDEBUG)
-        // if(m_RobotsCnt>0) DM(CWStr().Format(L"Res2 Side=<i>",m_Id).Get(),CWStr().Format(L"<i> <i> <i>
-        // <i>",m_Resources[0],m_Resources[1],m_Resources[2],m_Resources[3]).Get()); #endif
+        // #if (defined _DEBUG) &&  !(defined _RELDEBUG)
+        //  if(m_RobotsCnt>0) DM(CWStr().Format(L"Res2 Side=<i>",m_Id).Get(),CWStr().Format(L"<i> <i> <i>
+        //  <i>",m_Resources[0],m_Resources[1],m_Resources[2],m_Resources[3]).Get()); #endif
 
         // Отображаем
 #if (defined _DEBUG) && !(defined _RELDEBUG) && !(defined _DISABLE_AI_HELPERS)

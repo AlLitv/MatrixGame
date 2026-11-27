@@ -110,20 +110,11 @@ SNewBorn *CConstructor::ProduceRobot(void *) {
 
         m_NewBorn->m_Robot = m_Build;
 
-        CMatrixSideUnit *si = g_MatrixMap->GetPlayerSide();
-
-        if (si->GetTeam(0)->m_RobotCnt < si->GetTeam(1)->m_RobotCnt &&
-            si->GetTeam(0)->m_RobotCnt < si->GetTeam(2)->m_RobotCnt)
-            m_NewBorn->m_Team = 0;
-        else if (si->GetTeam(1)->m_RobotCnt < si->GetTeam(0)->m_RobotCnt &&
-                 si->GetTeam(1)->m_RobotCnt < si->GetTeam(2)->m_RobotCnt)
-            m_NewBorn->m_Team = 1;
-        else if (si->GetTeam(2)->m_RobotCnt < si->GetTeam(0)->m_RobotCnt &&
-                 si->GetTeam(2)->m_RobotCnt < si->GetTeam(1)->m_RobotCnt)
-            m_NewBorn->m_Team = 2;
-        else
-            m_NewBorn->m_Team = g_MatrixMap->Rnd(0, 2);
-
+        // Выбор команды по числу роботов в отрядах стороны игрока — мёртвый код:
+        // ниже команда всё равно обнуляется. Но в ветке "иначе" он тянул число из
+        // логического ГПСЧ, поэтому карта игрока (какая сторона считается
+        // «стороной игрока» на этой машине) влияла на поток случайных чисел и
+        // рассинхронизировала сетевой матч. Убрано целиком.
         m_NewBorn->m_Team = 0;
         // Team
         m_Build->SetTeam(m_NewBorn->m_Team);
