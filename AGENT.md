@@ -218,6 +218,7 @@ The differential technique: run the same battle twice with `MATRIXGAME_FILL=CD` 
 | `tools/simdiff.py` | compares two hash logs or two object dumps, reports the first diverging field |
 | `tools/randlog_sites.py` | compares RNG call-site histograms and names the function via `MatrixGame.map` |
 | `tools/gen_layout.py` | regenerates `SimLayout*.inc`, the field-offset tables the fill scanner uses |
+| `tools/netpeer.py` | UDP peer for netplay tests: replays a command log, observes, injects a wrong hash, or emulates a lossy link (`--delay-ms`, `--jitter-ms`, `--loss`, `--loss-in`) |
 
 `MATRIXGAME_OBJLOG` also reports, per robot, `garb=` (how many dwords still hold the fill byte) and `gof=` (their offsets, resolvable through the `.layout` file written next to the log). That is how the list of uninitialised fields above was produced.
 

@@ -27,6 +27,7 @@
 
 import argparse
 import os
+import random
 import socket
 import struct
 import sys
@@ -198,12 +199,47 @@ class Peer(object):
         if self.ref:
             self.end_tick = max(self.end_tick, max(self.ref.keys()) // TICK_MS)
 
+        # Эмуляция канала: задержка, джиттер и потери в обе стороны. Нужна, чтобы
+        # проверить барьер и перепосылку, а не только «идеальный localhost».
+        self.outbox = []
+        self.lost_tx = 0
+        self.lost_rx = 0
+        self.sent_ready = -1
+        self.last_ready_sent = 0.0
+        if args.link_seed is not None:
+            random.seed(args.link_seed)
+
     def send(self, mtype, payload):
         packet = HDR.pack(MAGIC, VERSION, mtype, len(payload)) + payload
+
+        if self.args.loss > 0 and random.random() < self.args.loss:
+            self.lost_tx += 1
+            return
+
+        delay = self.args.delay_ms
+        if self.args.jitter_ms > 0:
+            delay += random.uniform(-self.args.jitter_ms, self.args.jitter_ms)
+        if delay > 0:
+            self.outbox.append((time.time() + delay / 1000.0, packet))
+            return
+
         try:
             self.sock.sendto(packet, self.host)
         except OSError:
             pass
+
+    def flush_outbox(self):
+        now = time.time()
+        keep = []
+        for when, packet in self.outbox:
+            if when <= now:
+                try:
+                    self.sock.sendto(packet, self.host)
+                except OSError:
+                    pass
+            else:
+                keep.append((when, packet))
+        self.outbox = keep
 
     def recv(self):
         while True:
@@ -218,6 +254,9 @@ class Peer(object):
             except OSError:
                 return
             if len(data) < HDR.size:
+                continue
+            if self.args.loss_in > 0 and random.random() < self.args.loss_in:
+                self.lost_rx += 1
                 continue
             magic, ver, mtype, length = HDR.unpack_from(data, 0)
             if magic != MAGIC or ver != VERSION:
@@ -341,7 +380,14 @@ class Peer(object):
         ready = min(self.window, safe)
         if ready > self.ready:
             self.ready = ready
-            self.send(READY, struct.pack('<i', ready))
+
+        # READY повторяем периодически: на канале с потерями одиночное сообщение
+        # теряется, и партнёр навсегда замирает на своём такте.
+        now = time.time()
+        if self.ready > 0 and (self.ready > self.sent_ready or now - self.last_ready_sent >= 0.1):
+            self.send(READY, struct.pack('<i', self.ready))
+            self.sent_ready = self.ready
+            self.last_ready_sent = now
 
     def run(self):
         started = time.time()
@@ -358,6 +404,7 @@ class Peer(object):
                 if now - last_hello >= 0.2:
                     self.send(HELLO, struct.pack('<II', self.args.side, self.args.seed))
                     last_hello = now
+                self.flush_outbox()
                 time.sleep(0.01)
                 self.recv()
                 continue
@@ -371,6 +418,8 @@ class Peer(object):
             self.resend()
             if not self.args.echo:
                 self.send_ready()
+
+            self.flush_outbox()
 
             if now - self.last_progress >= 2.0:
                 self.last_progress = now
@@ -393,6 +442,9 @@ class Peer(object):
 
         print('done: host reached t=%d ms, hashes %d (ok %d, bad %d), commands sent %d, dropped %d' %
               (self.applied * TICK_MS, self.hashes, self.hashes_ok, self.hashes_bad, self.sent, self.drops))
+        if self.args.loss or self.args.loss_in or self.args.delay_ms:
+            print('link: delay %d ms +- %d, loss out %d, loss in %d (packets dropped)' %
+                  (self.args.delay_ms, self.args.jitter_ms, self.lost_tx, self.lost_rx))
 
         if self.args.echo:
             return self.report_echo()
@@ -449,6 +501,11 @@ def main():
     ap.add_argument('--end-tick', type=int, default=6000)
     ap.add_argument('--fake-hash', type=int, default=0, help='send N deliberately wrong hashes')
     ap.add_argument('--drop-every', type=int, default=0, help='drop the first send of every Nth command batch')
+    ap.add_argument('--delay-ms', type=int, default=0, help='link emulation: one-way delay for outgoing packets')
+    ap.add_argument('--jitter-ms', type=int, default=0, help='link emulation: random spread around the delay')
+    ap.add_argument('--loss', type=float, default=0.0, help='link emulation: drop this fraction of outgoing packets')
+    ap.add_argument('--loss-in', type=float, default=0.0, help='link emulation: drop this fraction of incoming packets')
+    ap.add_argument('--link-seed', type=int, default=1, help='seed for the link emulation (repeatable runs)')
     ap.add_argument('--timeout', type=float, default=300.0)
     args = ap.parse_args()
 

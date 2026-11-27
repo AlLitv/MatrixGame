@@ -229,6 +229,14 @@ void SendState(void) {
     b.I32(g_AppliedTick);
     SendRaw(NET_ACK, b.m_Data, b.m_Len);
 
+    // READY нужен и от игры: наблюдатель на другой машине без него не сдвинет
+    // свой барьер и будет стоять на нулевом такте. Это же сообщение переживает
+    // потерю пакета — оно уходит периодически вместе с ACK.
+    SBuf r;
+    r.Reset();
+    r.I32(g_AppliedTick);
+    SendRaw(NET_READY, r.m_Data, r.m_Len);
+
     g_LastStateMs = NowMs();
     g_StateDirty = false;
 }
