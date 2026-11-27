@@ -24,6 +24,7 @@
 #include "MatrixFlyer.hpp"
 #include "Interface/CCounter.h"
 #include "CmdQueue.hpp"
+#include "SimHarness.hpp"
 #include <time.h>
 
 // robot->GetEnv()->m_Place -   место куда робот идет или где стоит.
@@ -874,20 +875,14 @@ void CMatrixSideUnit::OnRButtonDouble(const CPoint &) {
     //}
 }
 
+// Ручное управление не трогает робота напрямую: оно копится в g_ArcadeInput и
+// раз в такт уходит командой CMD_ARCADE_CONTROL (см. ArcadeInputTick).
 void CMatrixSideUnit::OnForward(bool down) {
     DTRACE();
     if (!IsRobotMode() || !m_Arcaded)
         return;
 
-    if (down && !m_Arcaded->AsRobot()->FindOrderLikeThat(ROT_MOVE_TO)) {
-        D3DXVECTOR3 vel = m_Arcaded->AsRobot()->m_Forward * m_Arcaded->AsRobot()->GetMaxSpeed();
-        float x = m_Arcaded->AsRobot()->m_PosX + vel.x;
-        float y = m_Arcaded->AsRobot()->m_PosY + vel.y;
-        m_Arcaded->AsRobot()->MoveTo(Float2Int(x / GLOBAL_SCALE_MOVE), Float2Int(y / GLOBAL_SCALE_MOVE));
-    }
-    else if (!down && m_Arcaded->AsRobot()->FindOrderLikeThat(ROT_MOVE_TO)) {
-        m_Arcaded->AsRobot()->StopMoving();
-    }
+    ArcadeInputMove(down ? 1 : 0);
 }
 
 void CMatrixSideUnit::OnBackward(bool down) {
@@ -895,15 +890,7 @@ void CMatrixSideUnit::OnBackward(bool down) {
     if (!IsRobotMode() || !m_Arcaded)
         return;
 
-    if (down && !m_Arcaded->AsRobot()->FindOrderLikeThat(ROT_MOVE_TO_BACK)) {
-        D3DXVECTOR3 vel = m_Arcaded->AsRobot()->m_Forward * m_Arcaded->AsRobot()->GetMaxSpeed();
-        float x = m_Arcaded->AsRobot()->m_PosX - vel.x;
-        float y = m_Arcaded->AsRobot()->m_PosY - vel.y;
-        m_Arcaded->AsRobot()->MoveToBack(Float2Int(x / GLOBAL_SCALE_MOVE), Float2Int(y / GLOBAL_SCALE_MOVE));
-    }
-    else if (!down && m_Arcaded->AsRobot()->FindOrderLikeThat(ROT_MOVE_TO_BACK)) {
-        m_Arcaded->AsRobot()->StopMoving();
-    }
+    ArcadeInputMove(down ? -1 : 0);
 }
 
 void CMatrixSideUnit::OnLeft(bool down) {
@@ -1290,6 +1277,12 @@ void CMatrixSideUnit::SetArcadedObject(CMatrixMapStatic *o) {
     if (o && o->GetSide() != m_Id) {
         return;
     }
+
+    // Признак «этим роботом управляет человек» — часть состояния мира: его
+    // читает CMatrixRobotAI::Takt вместо прежнего «кто здесь игрок».
+    if (m_Arcaded && m_Arcaded->IsRobot())
+        m_Arcaded->AsRobot()->m_ManualActive = false;
+
     if (IsRobotMode()) {
         if (m_Arcaded->AsRobot()->m_SoundChassis) {
             CSound::StopPlay(m_Arcaded->AsRobot()->m_SoundChassis);
@@ -1307,58 +1300,86 @@ void CMatrixSideUnit::SetArcadedObject(CMatrixMapStatic *o) {
         RESETFLAG(g_MatrixMap->m_Flags, MMFLAG_SOUND_ORDER_ATTACK_DISABLE);
     }
 
+    // Ниже — две части: мир (скорость, коэффициенты оружия, приказы) и
+    // интерфейс (выделение, панели оружия, звуки). В сетевом матче команда
+    // приходит и для чужой стороны, поэтому интерфейсную часть выполняем только
+    // на машине того, кто за эту сторону играет: у чужой стороны нет ни
+    // выделения, ни панелей, и обращение к ним падало.
+    const bool isLocal = (g_MatrixMap && g_MatrixMap->GetPlayerSide() == this);
+
     if (IsRobotMode() && (o == NULL || o == m_Arcaded)) {
         m_Arcaded->AsRobot()->SetMaxSpeed(m_Arcaded->AsRobot()->GetMaxSpeed() / SPEED_BOOST);
         o = NULL;
-        m_Arcaded->AsRobot()->UnSelect();
-        if (g_IFaceList)
-            g_IFaceList->DeleteWeaponDynamicStatics();
-        Select(NOTHING, NULL);
+        if (isLocal) {
+            m_Arcaded->AsRobot()->UnSelect();
+            if (g_IFaceList)
+                g_IFaceList->DeleteWeaponDynamicStatics();
+            Select(NOTHING, NULL);
+        }
     }
     else if (IsRobotMode() && o->GetObjectType() == OBJECT_TYPE_ROBOTAI) {
-        if (g_IFaceList)
+        if (isLocal && g_IFaceList)
             g_IFaceList->DeleteWeaponDynamicStatics();
-        m_Arcaded->AsRobot()->UnSelect();
+        if (isLocal)
+            m_Arcaded->AsRobot()->UnSelect();
         m_Arcaded->AsRobot()->SetMaxSpeed(m_Arcaded->AsRobot()->GetMaxSpeed() / SPEED_BOOST);
         m_Arcaded->AsRobot()->SetWeaponToDefaultCoeff();
     }
     else if (IsRobotMode() && o->GetObjectType() == OBJECT_TYPE_FLYER) {
-        if (g_IFaceList)
+        if (isLocal && g_IFaceList)
             g_IFaceList->DeleteWeaponDynamicStatics();
-        m_Arcaded->AsRobot()->UnSelect();
+        if (isLocal)
+            m_Arcaded->AsRobot()->UnSelect();
         m_Arcaded->AsRobot()->SetMaxSpeed(m_Arcaded->AsRobot()->GetMaxSpeed() / SPEED_BOOST);
     }
 
     m_Arcaded = o;
+    if (o && o->IsRobot()) {
+        CMatrixRobotAI *robot = o->AsRobot();
+        robot->m_ManualActive = true;
+        robot->m_ManualTurn = 0;
+        robot->m_ManualMove = 0;
+        robot->m_ManualFire = false;
+        robot->m_ManualAimX = robot->GetMapPosX();
+        robot->m_ManualAimY = robot->GetMapPosY();
+    }
     if (IsRobotMode()) {
         CMatrixRobotAI *robot = (CMatrixRobotAI *)o;
-        if (robot->m_Unit[0].m_Kind == RUK_CHASSIS_PNEUMATIC) {
-            robot->m_SoundChassis =
-                    CSound::Play(robot->m_SoundChassis, S_CHASSIS_PNEUMATIC_LOOP, robot->GetGeoCenter(), SL_CHASSIS);
-        }
-        else if (robot->m_Unit[0].m_Kind == RUK_CHASSIS_WHEEL) {
-            robot->m_SoundChassis =
-                    CSound::Play(robot->m_SoundChassis, S_CHASSIS_WHEEL_LOOP, robot->GetGeoCenter(), SL_CHASSIS);
-        }
-        else if (robot->m_Unit[0].m_Kind == RUK_CHASSIS_TRACK) {
-            robot->m_SoundChassis =
-                    CSound::Play(robot->m_SoundChassis, S_CHASSIS_TRACK_LOOP, robot->GetGeoCenter(), SL_CHASSIS);
-        }
-        else if (robot->m_Unit[0].m_Kind == RUK_CHASSIS_HOVERCRAFT) {
-            robot->m_SoundChassis =
-                    CSound::Play(robot->m_SoundChassis, S_CHASSIS_HOVERCRAFT_LOOP, robot->GetGeoCenter(), SL_CHASSIS);
-        }
-        else if (robot->m_Unit[0].m_Kind == RUK_CHASSIS_ANTIGRAVITY) {
-            robot->m_SoundChassis =
-                    CSound::Play(robot->m_SoundChassis, S_CHASSIS_ANTIGRAVITY_LOOP, robot->GetGeoCenter(), SL_CHASSIS);
+
+        if (isLocal) {
+            if (robot->m_Unit[0].m_Kind == RUK_CHASSIS_PNEUMATIC) {
+                robot->m_SoundChassis = CSound::Play(robot->m_SoundChassis, S_CHASSIS_PNEUMATIC_LOOP,
+                                                     robot->GetGeoCenter(), SL_CHASSIS);
+            }
+            else if (robot->m_Unit[0].m_Kind == RUK_CHASSIS_WHEEL) {
+                robot->m_SoundChassis =
+                        CSound::Play(robot->m_SoundChassis, S_CHASSIS_WHEEL_LOOP, robot->GetGeoCenter(), SL_CHASSIS);
+            }
+            else if (robot->m_Unit[0].m_Kind == RUK_CHASSIS_TRACK) {
+                robot->m_SoundChassis =
+                        CSound::Play(robot->m_SoundChassis, S_CHASSIS_TRACK_LOOP, robot->GetGeoCenter(), SL_CHASSIS);
+            }
+            else if (robot->m_Unit[0].m_Kind == RUK_CHASSIS_HOVERCRAFT) {
+                robot->m_SoundChassis = CSound::Play(robot->m_SoundChassis, S_CHASSIS_HOVERCRAFT_LOOP,
+                                                     robot->GetGeoCenter(), SL_CHASSIS);
+            }
+            else if (robot->m_Unit[0].m_Kind == RUK_CHASSIS_ANTIGRAVITY) {
+                robot->m_SoundChassis = CSound::Play(robot->m_SoundChassis, S_CHASSIS_ANTIGRAVITY_LOOP,
+                                                     robot->GetGeoCenter(), SL_CHASSIS);
+            }
         }
 
         m_Arcaded->AsRobot()->SetMaxSpeed(m_Arcaded->AsRobot()->GetMaxSpeed() * SPEED_BOOST);
         robot->SetWeaponToArcadedCoeff();
-        Select(ARCADE, o);
-        m_Arcaded->AsRobot()->SelectArcade();
-        if (g_IFaceList)
-            g_IFaceList->CreateWeaponDynamicStatics();
+        // Интерфейсная часть — только для своей стороны и только когда интерфейс
+        // действительно есть: внутри CreateWeaponDynamicStatics обращение к
+        // GetCurGroup()->m_FirstObject, а в харнессе (без выделения) это NULL.
+        if (isLocal && GetCurGroup() && g_IFaceList && g_IFaceList->m_First) {
+            Select(ARCADE, o);
+            m_Arcaded->AsRobot()->SelectArcade();
+            if (g_IFaceList)
+                g_IFaceList->CreateWeaponDynamicStatics();
+        }
         m_Arcaded->AsRobot()->BreakAllOrders();
     }
 }

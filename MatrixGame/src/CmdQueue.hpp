@@ -43,6 +43,12 @@ enum ECommandType {
     // Построить турель на здании: m_Param[0] тип, [1] x*100, [2] y*100,
     // [3] угол, [4] индекс места; m_ObjId — здание.
     CMD_BUILD_TURRET,
+    // Аркадный режим. Вход/выход — m_ObjId робот; управление на такт:
+    // m_Param[0] поворот (-1/0/+1), [1] ход (-1/0/+1), [2] огонь,
+    // [3] x прицела в клетках, [4] y прицела в клетках.
+    CMD_ARCADE_ENTER,
+    CMD_ARCADE_LEAVE,
+    CMD_ARCADE_CONTROL,
 
     CMD_TYPE_MAX
 };
@@ -113,5 +119,33 @@ int CmdOrderObject(CMatrixSideUnit *su, int type, CMatrixMapStatic *target, bool
 
 // Позиция объекта в клетках карты — для приказов «по объекту».
 CPoint CmdObjectPos(CMatrixMapStatic *obj);
+
+// Ручное управление (аркадный режим). Кадр собирает состояние клавиш и мыши в
+// g_ArcadeInput, такт отправляет его командой CMD_ARCADE_CONTROL — так мир
+// получает ввод по тактам, а не по кадрам, и одинаково на обеих машинах.
+struct SArcadeInput {
+    int m_Turn;  // -1 / 0 / +1 — поворот корпуса, накопленный с прошлого такта
+    int m_Move;  // -1 / 0 / +1 — назад / стоять / вперёд
+    bool m_Fire;  // держим огонь
+    int m_AimX;   // прицел в клетках карты
+    int m_AimY;
+    int m_MouseTurn;  // мышь крутила корпус: -1 / 0 / +1, сбрасывается тактом
+};
+
+extern SArcadeInput g_ArcadeInput;
+
+// Раз в кадр: собрать клавиши/курсор в g_ArcadeInput (только для своей стороны).
+void ArcadeInputSample(void);
+// Раз в такт: если игрок в роботе, поставить CMD_ARCADE_CONTROL на изменение.
+void ArcadeInputTick(void);
+// Из OnForward/OnBackward: -1 / 0 / +1.
+void ArcadeInputMove(int dir);
+// Из MouseMove: мышь повернула корпус.
+void ArcadeInputMouseTurn(int dir);
+
+// Вход/выход из робота через очередь команд (интерфейс зовёт это вместо
+// SetArcadedObject, чтобы обе машины узнали об этом на одном такте).
+int CmdArcadeEnter(CMatrixSideUnit *su, CMatrixMapStatic *robot);
+int CmdArcadeLeave(CMatrixSideUnit *su);
 
 #endif  // CMDQUEUE_HPP

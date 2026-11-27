@@ -3922,7 +3922,9 @@ void CIFaceList::LiveRobot(void) {
             type = FLYER;
         }
 
-        ps->SetArcadedObject(NULL);
+        // Выход из робота — командой: обе машины должны узнать об этом на одном
+        // такте, иначе ручной робот останется ручным только у одного игрока.
+        CmdArcadeLeave(ps);
 
         CMatrixGroup *grp = ps->GetCurSelGroup();
 
@@ -3952,7 +3954,8 @@ void CIFaceList::EnterRobot(bool pos) {
             o = ps->GetCurGroup()->GetObjectByN(ps->GetCurSelNum());
         }
 
-        ps->SetArcadedObject(o);
+        // Вход в робота — тоже командой (см. CmdArcadeLeave выше).
+        CmdArcadeEnter(ps, o);
 
         CInterface *ifs = g_IFaceList->m_First;
         while (ifs) {

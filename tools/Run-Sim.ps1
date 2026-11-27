@@ -55,6 +55,7 @@ param(
     [string]$NetPeer = "",
     [string]$NetSides = "",
     [switch]$NetObserver,
+    [switch]$ArcadeBot,
     [string]$NetBind = "",
     [int]$WindowX = -100000,
     [int]$WindowY = 0,
@@ -138,6 +139,7 @@ else {
 if ($NetPeer) { $env:MATRIXGAME_NET_PEER = $NetPeer } else { Remove-Item Env:\MATRIXGAME_NET_PEER -ErrorAction SilentlyContinue }
 if ($NetSides) { $env:MATRIXGAME_NET_SIDES = $NetSides } else { Remove-Item Env:\MATRIXGAME_NET_SIDES -ErrorAction SilentlyContinue }
 if ($NetObserver) { $env:MATRIXGAME_NET_OBSERVER = '1' } else { Remove-Item Env:\MATRIXGAME_NET_OBSERVER -ErrorAction SilentlyContinue }
+if ($ArcadeBot) { $env:MATRIXGAME_ARCADEBOT = '1' } else { Remove-Item Env:\MATRIXGAME_ARCADEBOT -ErrorAction SilentlyContinue }
 if ($NetBind) { $env:MATRIXGAME_NET_BIND = $NetBind } else { Remove-Item Env:\MATRIXGAME_NET_BIND -ErrorAction SilentlyContinue }
 
 # The net world hash is written even without a socket, so an offline run gives the
@@ -158,6 +160,7 @@ if ($Net) { "net      : udp $NetPort, local side $NetLocalSide, log $netLogPath"
 if ($NetPeer) { "net peer : $NetPeer" }
 if ($NetSides) { "net sides: $NetSides (human-controlled)" }
 if ($NetObserver) { "net      : observer mode, no local commands" }
+if ($ArcadeBot) { "arcade   : autopilot enters a robot every 400 ticks" }
 if ($NetBind) { "net bind : $NetBind" }
 if ($netHashPath) { "nethash  : $netHashPath" }
 

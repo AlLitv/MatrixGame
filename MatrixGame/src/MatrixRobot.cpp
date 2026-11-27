@@ -106,6 +106,13 @@ CMatrixRobotAI::CMatrixRobotAI()
     m_Ablaze(DEBUG_CALL_INFO)
 #endif
 {
+    m_ManualActive = false;
+    m_ManualTurn = 0;
+    m_ManualMove = 0;
+    m_ManualFire = false;
+    m_ManualAimX = 0;
+    m_ManualAimY = 0;
+
     m_ColsWeight = 0;
     m_ColsWeight2 = 0;
 
@@ -381,7 +388,7 @@ void CMatrixRobotAI::LogicTakt(int ms) {
     DCP();
 
 #ifdef _SUB_BUG
-    if (this == g_MatrixMap->GetPlayerSide()->GetArcadedObject()) {
+    if (IsManuallyControlled()) {
         g_MatrixMap->m_DI.T(L"ms", CWStr(ms));
     }
 #endif
@@ -816,17 +823,16 @@ void CMatrixRobotAI::LogicTakt(int ms) {
     //    CDText::T("Velocity", CStr(m_Speed));
     DCP();
 
-    if (m_Side == PLAYER_SIDE && this == g_MatrixMap->GetPlayerSide()->GetArcadedObject() &&
-        m_CurrState == ROBOT_SUCCESSFULLY_BUILD) {
-        if (g_IFaceList->m_InFocus != INTERFACE) {
-            RotateHull(g_MatrixMap->m_TraceStopPos);
-        }
+    if (IsManuallyControlled() && m_CurrState == ROBOT_SUCCESSFULLY_BUILD) {
+        // Корпус доворачивается на прицел из команды, а не на точку под курсором:
+        // курсор есть только на машине того, кто целится.
+        RotateHull(D3DXVECTOR3((float)m_ManualAimX * GLOBAL_SCALE_MOVE, (float)m_ManualAimY * GLOBAL_SCALE_MOVE, 0.0f));
     }
     DCP();
 
     // TODO : fire while capture here!
 
-    if (this != g_MatrixMap->GetPlayerSide()->GetArcadedObject()) {
+    if (!IsManuallyControlled()) {
         if (m_Environment.m_Target && m_Environment.m_Target->IsRobot() &&
             m_Environment.m_Target->AsRobot()->m_CurrState == ROBOT_SUCCESSFULLY_BUILD) {
             DCP();
@@ -920,7 +926,7 @@ void CMatrixRobotAI::LogicTakt(int ms) {
             }
         }
         else {
-            if (this != (CMatrixRobotAI *)g_MatrixMap->GetPlayerSide()->GetArcadedObject()) {
+            if (!IsManuallyControlled()) {
                 StopFire();
                 RotateHull(D3DXVECTOR3(m_PosX + m_Forward.x, m_PosY + m_Forward.y, 0));
             }
@@ -931,25 +937,24 @@ void CMatrixRobotAI::LogicTakt(int ms) {
 
     // ORDERS PROCESSING/////////////////////////////////////////////////////
 
-    if (this == (CMatrixRobotAI *)g_MatrixMap->GetPlayerSide()
-                        ->GetArcadedObject() /* && !((GetAsyncKeyState(VK_RBUTTON) & 0x8000) == 0x8000)*/) {
-        if (((GetAsyncKeyState(g_Config.m_KeyActions[KA_UNIT_LEFT]) & 0x8000) == 0x8000) ||
-            ((GetAsyncKeyState(g_Config.m_KeyActions[KA_UNIT_LEFT_ALT]) & 0x8000) == 0x8000)) {
+    // Ручное управление приходит командой раз в такт (ArcadeInputTick), а не
+    // читается из клавиатуры: клавиатура и курсор — это состояние машины
+    // игрока, а не мира, и в сети они у каждого свои.
+    if (m_ManualActive) {
+        if (m_ManualTurn < 0)
             RotateRobotLeft();
-        }
-        if (((GetAsyncKeyState(g_Config.m_KeyActions[KA_UNIT_RIGHT]) & 0x8000) == 0x8000) ||
-            ((GetAsyncKeyState(g_Config.m_KeyActions[KA_UNIT_RIGHT_ALT]) & 0x8000) == 0x8000)) {
+        if (m_ManualTurn > 0)
             RotateRobotRight();
-        }
-        if (((GetAsyncKeyState(g_Config.m_KeyActions[KA_FIRE]) & 0x8000) == 0x8000)) {
-            if (!FindOrderLikeThat(ROT_FIRE) && g_IFaceList->m_InFocus != INTERFACE) {
-                Fire(g_MatrixMap->m_TraceStopPos);
+
+        if (m_ManualFire) {
+            if (!FindOrderLikeThat(ROT_FIRE)) {
+                D3DXVECTOR3 aim((float)m_ManualAimX * GLOBAL_SCALE_MOVE, (float)m_ManualAimY * GLOBAL_SCALE_MOVE, 0.0f);
+                Fire(aim);
             }
         }
         else {
-            if (FindOrderLikeThat(ROT_FIRE)) {
+            if (FindOrderLikeThat(ROT_FIRE))
                 StopFire();
-            }
         }
     }
     DCP();
@@ -981,7 +986,7 @@ void CMatrixRobotAI::LogicTakt(int ms) {
     if (FLAG(g_MatrixMap->m_Flags, MMFLAG_AUTOMATIC_MODE) || !g_MatrixMap->IsHumanSide(m_Side))
         TaktCaptureCandidate(ms);
 
-    // if(this == g_MatrixMap->GetPlayerSide()->GetArcadedObject()){
+    // if(IsManuallyControlled()){
     //    ASSERT(1);
     //}
     int cnt = 0;
@@ -995,15 +1000,13 @@ void CMatrixRobotAI::LogicTakt(int ms) {
             case ROT_MOVE_TO:
             case ROT_MOVE_TO_BACK: {
                 DCP();
-                if (this == (CMatrixRobotAI *)g_MatrixMap->GetPlayerSide()->GetArcadedObject()) {
-                    if (((GetAsyncKeyState(g_Config.m_KeyActions[KA_UNIT_FORWARD]) & 0x8000) == 0x8000) ||
-                        ((GetAsyncKeyState(g_Config.m_KeyActions[KA_UNIT_FORWARD_ALT]) & 0x8000) == 0x8000)) {
+                if (IsManuallyControlled()) {
+                    if (m_ManualMove > 0) {
                         D3DXVECTOR3 dest(m_PosX, m_PosY, 0);
                         dest += m_Forward * m_maxSpeed;
                         LowLevelMove(ms, dest, true, true, false);
                     }
-                    else if (((GetAsyncKeyState(g_Config.m_KeyActions[KA_UNIT_BACKWARD]) & 0x8000) == 0x8000) ||
-                             ((GetAsyncKeyState(g_Config.m_KeyActions[KA_UNIT_BACKWARD_ALT]) & 0x8000) == 0x8000)) {
+                    else if (m_ManualMove < 0) {
                         D3DXVECTOR3 dest(m_PosX, m_PosY, 0);
                         dest -= m_Forward * m_maxSpeed;
                         LowLevelMove(ms, dest, true, true, false, true);
@@ -1126,13 +1129,12 @@ void CMatrixRobotAI::LogicTakt(int ms) {
 
                 m_OrdersList[0].GetParams(&f1, &f2, &f3, &type);
 
-                if (g_MatrixMap->GetPlayerSide()->GetArcadedObject() == this) {
-                    m_WeaponDir.x = g_MatrixMap->m_TraceStopPos.x;
-                    m_WeaponDir.y = g_MatrixMap->m_TraceStopPos.y;
-                    // if(IS_TRACE_STOP_OBJECT(g_MatrixMap->m_TraceStopObj))
-                    //             m_WeaponDir.z = g_MatrixMap->m_TraceStopObj->GetGeoCenter().z;
-                    // else
-                    m_WeaponDir.z = g_MatrixMap->m_TraceStopPos.z;
+                if (IsManuallyControlled()) {
+                    // Прицел — из команды (клетки карты), а не из курсора:
+                    // курсор есть только на машине того, кто целится.
+                    m_WeaponDir.x = (float)m_ManualAimX * GLOBAL_SCALE_MOVE;
+                    m_WeaponDir.y = (float)m_ManualAimY * GLOBAL_SCALE_MOVE;
+                    m_WeaponDir.z = g_MatrixMap->GetZ(m_WeaponDir.x, m_WeaponDir.y);
                 }
                 else {
                     /*
@@ -1345,8 +1347,7 @@ void CMatrixRobotAI::LogicTakt(int ms) {
     //}
     {
         for (int nC = 0; nC < m_WeaponsCnt; ++nC) {
-            if (m_Weapons[nC].IsEffectPresent() &&
-                (m_Weapons[nC].m_On || g_MatrixMap->GetPlayerSide()->GetArcadedObject() == this)) {
+            if (m_Weapons[nC].IsEffectPresent() && (m_Weapons[nC].m_On || IsManuallyControlled())) {
                 //            m_WeaponDir.x = g_MatrixMap->m_TraceStopPos.x;
                 //    		m_WeaponDir.y = g_MatrixMap->m_TraceStopPos.y;
                 // m_WeaponDir.z = g_MatrixMap->m_TraceStopPos.z;
@@ -1384,7 +1385,7 @@ void CMatrixRobotAI::LogicTakt(int ms) {
 
                 // CHECKRIDE
                 // Fire distance checkride
-                if (this != g_MatrixMap->GetPlayerSide()->GetArcadedObject()) {
+                if (!IsManuallyControlled()) {
                     if (D3DXVec3LengthSq(&(GetGeoCenter() - m_WeaponDir)) > fire_dist * fire_dist) {
                         m_Weapons[nC].FireEnd();
                         continue;
@@ -2236,8 +2237,7 @@ void CMatrixRobotAI::RotateHull(const D3DXVECTOR3 &dest) {
     D3DXVECTOR3 destDirN(0, 0, 0), destDir(0, 0, 0);
 
     destDir = dest - D3DXVECTOR3(m_PosX, m_PosY, 0);
-    if (this == (CMatrixRobotAI *)g_MatrixMap->GetPlayerSide()->GetArcadedObject() &&
-        D3DXVec3LengthSq(&destDir) < MIN_ROT_DIST * MIN_ROT_DIST) {
+    if (IsManuallyControlled() && D3DXVec3LengthSq(&destDir) < MIN_ROT_DIST * MIN_ROT_DIST) {
         destDirN = m_HullForward;
     }
     else {
@@ -2255,7 +2255,7 @@ void CMatrixRobotAI::RotateHull(const D3DXVECTOR3 &dest) {
     D3DXVec3Normalize(&vec, &vec);
     float cos2 = m_HullForward.x * vec.x + m_HullForward.y * vec.y;
 
-    if (this == (CMatrixRobotAI *)g_MatrixMap->GetPlayerSide()->GetArcadedObject()) {
+    if (IsManuallyControlled()) {
         bool dchanged = false;
         if (fabs(angle3) >= GRAD2RAD(HULL_ROT_S_ANGL)) {
             float cosmos = destDirN.x * (-m_HullForward.y) + destDirN.y * (m_HullForward.x);
@@ -2613,7 +2613,7 @@ void CMatrixRobotAI::LowLevelMove(int ms, const D3DXVECTOR3 &dest, bool robot_co
     }
 
 #ifdef _SUB_BUG
-    if (this == g_MatrixMap->GetPlayerSide()->GetArcadedObject()) {
+    if (IsManuallyControlled()) {
         g_MatrixMap->m_DI.T(L"pos_x", CWStr(m_PosX));
         g_MatrixMap->m_DI.T(L"pos_y", CWStr(m_PosY));
         g_MatrixMap->m_DI.T(L"geo_x", CWStr(m_Core->m_GeoCenter.x));
@@ -2818,7 +2818,7 @@ D3DXVECTOR3 CMatrixRobotAI::SphereRobotToAABBObstacleCollision(D3DXVECTOR3 &corr
     }
 
     // #ifdef _SUB_BUG
-    //  if(this == g_MatrixMap->GetPlayerSide()->GetArcadedObject()){
+    //  if(IsManuallyControlled()){
     //     g_MatrixMap->m_DI.T(L"col_cnt", CWStr(col_cnt + m_Cols));
     // }
     // #endif
@@ -3199,9 +3199,8 @@ void CMatrixRobotAI::WallAvoid(const D3DXVECTOR3 &o, const D3DXVECTOR3 &dest) {
         float cos = dest_n.x * m_CollAvoid.x + dest_n.y * m_CollAvoid.y;
         float angle = (float)acos(cos);
 
-        if (this == g_MatrixMap->GetPlayerSide()->GetArcadedObject()) {
-            if (((GetAsyncKeyState(g_Config.m_KeyActions[KA_UNIT_LEFT]) & 0x8000) == 0x8000) ||
-                ((GetAsyncKeyState(g_Config.m_KeyActions[KA_UNIT_RIGHT]) & 0x8000) == 0x8000)) {
+        if (IsManuallyControlled()) {
+            if (m_ManualTurn != 0) {
                 ZeroMemory(&m_CollAvoid, sizeof(D3DXVECTOR3));
             }
         }
@@ -3732,8 +3731,8 @@ bool CMatrixRobotAI::SphereToAABBCheck(const D3DXVECTOR2 &p, const D3DXVECTOR2 &
 //
 ////Backward
 //					vBackward = LineToAABBIntersection(vLd, vRd, vCellLu, vCellLd, vCellRu, vCellRd, bReversX,
-// bReversY); 					if(D3DXVec3LengthSq(&vBackward) > D3DXVec3LengthSq(&vBackwardPrev)){ 						vBackwardPrev =
-// vBackward;
+// bReversY); 					if(D3DXVec3LengthSq(&vBackward) > D3DXVec3LengthSq(&vBackwardPrev)){ 						vBackwardPrev
+// = vBackward;
 //					}
 //
 //
@@ -4723,7 +4722,7 @@ bool CMatrixRobotAI::HaveBomb(void) const {
 }
 
 void CMatrixRobotAI::MoveTo(int mx, int my) {
-    // if(this == g_MatrixMap->GetPlayerSide()->GetArcadedObject()){
+    // if(IsManuallyControlled()){
     //    ASSERT(1);
     //}
 
@@ -5226,13 +5225,17 @@ void CMatrixRobotAI::ReleaseMe(void) {
         m_ZonePath = NULL;
     }
 
-    if (this == g_MatrixMap->GetPlayerSide()->GetArcadedObject()) {
-        g_MatrixMap->GetPlayerSide()->SetArcadedObject(NULL);
+    if (IsManuallyControlled()) {
+        // Выход из аркады по смерти — для своей стороны, а не для «стороны
+        // игрока»: у второго игрока она другая.
+        CMatrixSideUnit *su = g_MatrixMap->GetSideById(GetSide());
+        if (su && su->GetArcadedObject() == this)
+            su->SetArcadedObject(NULL);
     }
 }
 
 void CMatrixRobotAI::GetLost(const D3DXVECTOR3 &v) {
-    if (this == g_MatrixMap->GetPlayerSide()->GetArcadedObject())
+    if (IsManuallyControlled())
         return;
 
     D3DXVECTOR3 f1, f2;

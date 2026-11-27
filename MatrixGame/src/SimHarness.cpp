@@ -544,6 +544,26 @@ int SimExceptionFilter(void *exceptionPointers) {
     }
     buf[sizeof(buf) - 1] = 0;
     SimTrace(buf);
+
+    // Цепочка кадров x86 (ebp) — без символов, но с адресами возврата: по ним
+    // видно, откуда пришли, если сверить с .map.
+    if (ep && ep->ContextRecord) {
+        DWORD *ebp = (DWORD *)ep->ContextRecord->Ebp;
+        for (int i = 0; i < 12 && ebp; ++i) {
+            const DWORD ret = ebp[1];
+            const DWORD next = ebp[0];
+            if (!ret)
+                break;
+            _snprintf(buf, sizeof(buf), "  frame %d ret=0x%08x module=0x%llx", i, (unsigned)ret,
+                      ModuleOffset((void *)ret));
+            buf[sizeof(buf) - 1] = 0;
+            SimTrace(buf);
+            if (next <= (DWORD)ebp)
+                break;
+            ebp = (DWORD *)next;
+        }
+    }
+
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
@@ -830,17 +850,21 @@ static bool CmdBotObserver(void) {
     return v != 0;
 }
 
-void SimCommandBotTick(int tick) {
-    const int period = CmdBotPeriod();
+// Автопилот аркадного режима: MATRIXGAME_ARCADEBOT=1. Раз в 400 тактов бот
+// входит в робота, крутит корпус, едет и стреляет, потом выходит. Нужен, чтобы
+// ручное управление попадало в эталон и в сетевой тест.
+static bool ArcadeBotEnabled(void) {
+    static int v = -1;
+    if (v < 0) {
+        const wchar_t *s = EnvStr(L"MATRIXGAME_ARCADEBOT");
+        v = (s && s[0] != L'0') ? 1 : 0;
+    }
+    return v != 0;
+}
 
-    if (period <= 0 || tick <= 0 || !g_MatrixMap)
-        return;
-
-    // Кем командует бот: в сети — только своей стороной (за остальные играет
-    // партнёр), офлайн с MATRIXGAME_CMDBOT_ALL — всеми «людьми» сразу, иначе
-    // только стороной игрока. Офлайн-эталон для сетевого теста снимается
-    // именно вторым режимом: в логе оказываются приказы обеих сторон.
-    int sideIdx[CMD_SIDE_MAX];
+// Кем командует бот (и автопилот аркады): в сети — своей стороной, офлайн с
+// MATRIXGAME_CMDBOT_ALL — всеми «людьми» сразу, иначе только стороной игрока.
+static int SelectBotSides(int *sideIdx) {
     int sideCnt = 0;
 
     for (int i = 0; i < g_MatrixMap->m_SideCnt && sideCnt < CMD_SIDE_MAX; ++i) {
@@ -870,6 +894,76 @@ void SimCommandBotTick(int tick) {
 
     if (CmdBotObserver())
         sideCnt = 0;  // наблюдатель ничего не придумывает, только принимает
+
+    return sideCnt;
+}
+
+static void SimArcadeBotSide(int tick, CMatrixSideUnit *su) {
+    const int phase = tick % 400;
+
+    if (phase == 2) {
+        for (CMatrixMapStatic *o = CMatrixMapStatic::GetFirstLogic(); o; o = o->GetNextLogic()) {
+            if (o->IsLiveRobot() && o->GetSide() == su->m_Id) {
+                CmdArcadeEnter(su, o);
+                break;
+            }
+        }
+        return;
+    }
+    if (phase == 360) {
+        CmdArcadeLeave(su);
+        return;
+    }
+    if (phase < 10 || phase > 355 || (phase % 10) != 0)
+        return;
+
+    // Прицел — в первого живого врага, иначе в центр карты.
+    int aimX = g_MatrixMap->m_Size.x / 2;
+    int aimY = g_MatrixMap->m_Size.y / 2;
+    for (CMatrixMapStatic *o = CMatrixMapStatic::GetFirstLogic(); o; o = o->GetNextLogic()) {
+        if (o->IsLiveRobot() && o->GetSide() != su->m_Id) {
+            aimX = o->AsRobot()->GetMapPosX();
+            aimY = o->AsRobot()->GetMapPosY();
+            break;
+        }
+    }
+
+    SCommand c;
+    ZeroMemory(&c, sizeof(c));
+    c.m_Type = CMD_ARCADE_CONTROL;
+    c.m_Side = su->m_Id;
+    c.m_ObjId = -1;
+    c.m_Param[0] = ((phase / 40) % 2) ? 1 : -1;
+    c.m_Param[1] = (phase % 120 < 80) ? 1 : 0;
+    c.m_Param[2] = (((phase / 20) % 3) == 0) ? 1 : 0;
+    c.m_Param[3] = aimX;
+    c.m_Param[4] = aimY;
+    CmdIssue(c);
+}
+
+static void SimArcadeBotTick(int tick) {
+    int sideIdx[CMD_SIDE_MAX];
+    const int sideCnt = SelectBotSides(sideIdx);
+    for (int i = 0; i < sideCnt; ++i)
+        SimArcadeBotSide(tick, &g_MatrixMap->m_Side[sideIdx[i]]);
+}
+
+void SimCommandBotTick(int tick) {
+    const int period = CmdBotPeriod();
+
+    if (tick <= 0 || !g_MatrixMap)
+        return;
+
+    // Автопилот аркадного режима работает каждый такт: управление — это поток
+    // состояния, а не редкие приказы.
+    if (ArcadeBotEnabled())
+        SimArcadeBotTick(tick);
+
+    if (period <= 0)
+        return;
+
+    int sideIdx[CMD_SIDE_MAX];
+    const int sideCnt = SelectBotSides(sideIdx);
 
     if (CmdReplayMode() || sideCnt <= 0)
         return;
@@ -939,7 +1033,6 @@ void SimCommandBotTick(int tick) {
         return;
 
     const int k = tick / period;
-
     for (int sidx = 0; sidx < sideCnt; ++sidx) {
         CMatrixSideUnit *ps = &g_MatrixMap->m_Side[sideIdx[sidx]];
 

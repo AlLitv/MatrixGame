@@ -60,6 +60,9 @@ TYPES = {
     'AUTODEF': 10,
     'BUILD': 11,
     'TURRET': 12,
+    'ARCADE_IN': 13,
+    'ARCADE_OUT': 14,
+    'ARCADE_CTL': 15,
 }
 
 TICK_MS = 10

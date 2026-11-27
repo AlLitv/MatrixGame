@@ -17,7 +17,7 @@
 #define CHECK_ROBOT_POS()                                                                                           \
     {                                                                                                               \
         if (m_MapX < 0 || m_MapX >= g_MatrixMap->m_SizeMove.x || m_MapY < 0 || m_MapY >= g_MatrixMap->m_SizeMove.y) \
-            debugbreak();                                                                                              \
+            debugbreak();                                                                                           \
     }
 #else
 #define CHECK_ROBOT_POS()
@@ -364,8 +364,12 @@ public:
     float GetMovePathDistFollow() const { return m_MovePathDistFollow; }
     int GetWeaponsCnt() const { return m_WeaponsCnt; }
     // Ориентация корпуса: Seek считает по ней уклон, от уклона зависит скорость.
-    D3DXVECTOR3 GetCoreUp() const { return D3DXVECTOR3(m_Core->m_Matrix._31, m_Core->m_Matrix._32, m_Core->m_Matrix._33); }
-    D3DXVECTOR3 GetCoreForward() const { return D3DXVECTOR3(m_Core->m_Matrix._21, m_Core->m_Matrix._22, m_Core->m_Matrix._23); }
+    D3DXVECTOR3 GetCoreUp() const {
+        return D3DXVECTOR3(m_Core->m_Matrix._31, m_Core->m_Matrix._32, m_Core->m_Matrix._33);
+    }
+    D3DXVECTOR3 GetCoreForward() const {
+        return D3DXVECTOR3(m_Core->m_Matrix._21, m_Core->m_Matrix._22, m_Core->m_Matrix._23);
+    }
     float GetCoreZ() const { return m_Core->m_Matrix._43; }
 #endif
     int GetOrdersInPool() { return m_OrdersInPool; }
@@ -406,6 +410,18 @@ public:
 
     void PlayHullSound();
     bool CheckFireDist(const D3DXVECTOR3 &point);
+
+    // Ручное управление (аркадный режим). Раньше это выводилось из
+    // `this == GetPlayerSide()->GetArcadedObject()`, то есть из того, кто сидит
+    // за этой машиной: на двух машинах «ручным» оказывался разный робот. Теперь
+    // это состояние мира — его ставит команда ARCADE_ENTER и снимает ARCADE_LEAVE.
+    bool m_ManualActive;
+    int m_ManualTurn;   // -1 / 0 / +1 — поворот корпуса на этом такте
+    int m_ManualMove;   // -1 / 0 / +1 — назад / стоять / вперёд
+    bool m_ManualFire;  // держим огонь
+    int m_ManualAimX;   // прицел в клетках карты
+    int m_ManualAimY;
+    bool IsManuallyControlled(void) const { return m_ManualActive; }
 
     bool IsAutomaticMode(void) const {
         return m_CurrState == ROBOT_IN_SPAWN || m_CurrState == ROBOT_BASE_MOVEOUT || m_CurrState == ROBOT_BASE_CAPTURE;

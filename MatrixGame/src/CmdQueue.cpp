@@ -15,6 +15,7 @@
 #include "MatrixMapStatic.hpp"
 #include "MatrixObjectBuilding.hpp"
 #include "MatrixObjectCannon.hpp"
+#include "Interface/CInterface.h"
 #include "RndSplit.hpp"
 #include "Logic/MatrixAIGroup.h"
 #include "Logic/MatrixRoadNetwork.hpp"
@@ -61,6 +62,12 @@ const char *CmdTypeName(int t) {
             return "BUILD";
         case CMD_BUILD_TURRET:
             return "TURRET";
+        case CMD_ARCADE_ENTER:
+            return "ARCADE_IN";
+        case CMD_ARCADE_LEAVE:
+            return "ARCADE_OUT";
+        case CMD_ARCADE_CONTROL:
+            return "ARCADE_CTL";
     }
     return "NONE";
 }
@@ -414,6 +421,70 @@ void CmdOrderFlyers(const SCommand &c) {
     }
 }
 
+// Ручное управление роботом на такте применения: вход/выход из аркады и сам
+// поток управления. Раньше всё это делал код, читающий клавиатуру и курсор
+// прямо в такте (`CMatrixRobotAI::Takt`), — то есть у каждой машины по-своему.
+void CmdApplyArcade(CMatrixSideUnit *su, const SCommand &c) {
+    if (!su)
+        return;
+
+    if (c.m_Type == CMD_ARCADE_ENTER) {
+        if (su->IsArcadeMode())
+            return;  // уже в роботе
+
+        CMatrixMapStatic *obj = CmdFindObject(c.m_ObjId);
+        if (!obj || !obj->IsLiveRobot() || obj->GetSide() != su->m_Id)
+            return;
+
+        su->SetArcadedObject(obj);
+        return;
+    }
+
+    if (c.m_Type == CMD_ARCADE_LEAVE) {
+        if (su->IsArcadeMode())
+            su->SetArcadedObject(NULL);
+        return;
+    }
+
+    // CMD_ARCADE_CONTROL: состояние на этот такт.
+    if (!su->IsArcadeMode() || !su->GetArcadedObject() || !su->GetArcadedObject()->IsLiveRobot())
+        return;
+
+    CMatrixRobotAI *robot = su->GetArcadedObject()->AsRobot();
+    if (!robot->IsLive())
+        return;
+
+    const int turn = c.m_Param[0];
+    const int move = c.m_Param[1];
+
+    robot->m_ManualTurn = (turn < 0) ? -1 : ((turn > 0) ? 1 : 0);
+    robot->m_ManualFire = (c.m_Param[2] != 0);
+    robot->m_ManualAimX = c.m_Param[3];
+    robot->m_ManualAimY = c.m_Param[4];
+
+    // Ход: приказ «вперёд/назад» ставится на переходе, дальше робота ведёт
+    // m_ManualMove в Takt (как раньше делал зажатый шифт клавиши).
+    if (move != robot->m_ManualMove) {
+        if (move > 0) {
+            robot->BreakAllOrders();
+            const D3DXVECTOR3 vel = robot->m_Forward * robot->GetMaxSpeed();
+            CPoint tp = CmdObjectPos(robot);
+            tp.x += Float2Int(vel.x * INVERT(GLOBAL_SCALE_MOVE));
+            tp.y += Float2Int(vel.y * INVERT(GLOBAL_SCALE_MOVE));
+            robot->MoveTo(tp.x, tp.y);
+        }
+        else if (move < 0) {
+            robot->BreakAllOrders();
+            const D3DXVECTOR3 vel = robot->m_Forward * robot->GetMaxSpeed();
+            CPoint tp = CmdObjectPos(robot);
+            tp.x -= Float2Int(vel.x * INVERT(GLOBAL_SCALE_MOVE));
+            tp.y -= Float2Int(vel.y * INVERT(GLOBAL_SCALE_MOVE));
+            robot->MoveToBack(tp.x, tp.y);
+        }
+    }
+    robot->m_ManualMove = (move < 0) ? -1 : ((move > 0) ? 1 : 0);
+}
+
 void CmdApply(const SCommand &c) {
     if (!g_MatrixMap)
         return;
@@ -428,6 +499,10 @@ void CmdApply(const SCommand &c) {
     }
     if (c.m_Type == CMD_BUILD_TURRET) {
         CmdApplyTurret(su, c);
+        return;
+    }
+    if (c.m_Type == CMD_ARCADE_ENTER || c.m_Type == CMD_ARCADE_LEAVE || c.m_Type == CMD_ARCADE_CONTROL) {
+        CmdApplyArcade(su, c);
         return;
     }
 
@@ -682,6 +757,10 @@ void CmdTick(int tick) {
     SimCommandBotTick(tick);
 #endif
 
+    // Ручное управление: то, что игрок держал в кадре, уходит командой на этот
+    // такт (и приедет на N + CMD_INPUT_LAG_TICKS, как любой ввод).
+    ArcadeInputTick();
+
     NetPump();
 
     // Забираем всё, чей такт уже наступил. Очередь может быть не отсортирована
@@ -714,6 +793,138 @@ int CmdCurrentTick(void) {
     if (!g_MatrixMap)
         return 0;
     return g_MatrixMap->GetTime() / LOGIC_TAKT_PERIOD;
+}
+
+SArcadeInput g_ArcadeInput;
+
+void ArcadeInputMove(int dir) {
+    g_ArcadeInput.m_Move = (dir < 0) ? -1 : ((dir > 0) ? 1 : 0);
+}
+
+void ArcadeInputMouseTurn(int dir) {
+    g_ArcadeInput.m_MouseTurn = (dir < 0) ? -1 : ((dir > 0) ? 1 : 0);
+}
+
+static bool KeyHeld(int idx) {
+    return (GetAsyncKeyState(g_Config.m_KeyActions[idx]) & 0x8000) == 0x8000;
+}
+
+// Раз в кадр: что игрок держит и куда смотрит курсор. Только для своей стороны
+// и только когда она в роботе — иначе это не ручное управление.
+void ArcadeInputSample(void) {
+    if (!g_MatrixMap)
+        return;
+
+    // Харнессный бот играет сам и ставит свои команды: подмешивать к ним ввод
+    // (пустой, но зависящий от кадров) нельзя — прогон перестал бы быть
+    // воспроизводимым.
+#ifdef MATRIXGAME_SIM_HARNESS
+    if (SimCommandBotEnabled()) {
+        return;
+    }
+#endif
+
+    CMatrixSideUnit *ps = g_MatrixMap->GetPlayerSide();
+    if (!ps || !ps->IsRobotMode() || !ps->GetArcadedObject() || !ps->GetArcadedObject()->IsRobot()) {
+        g_ArcadeInput.m_Turn = 0;
+        g_ArcadeInput.m_Move = 0;
+        g_ArcadeInput.m_Fire = false;
+        g_ArcadeInput.m_MouseTurn = 0;
+        return;
+    }
+
+    int turn = g_ArcadeInput.m_MouseTurn;
+    if (KeyHeld(KA_UNIT_LEFT) || KeyHeld(KA_UNIT_LEFT_ALT))
+        --turn;
+    if (KeyHeld(KA_UNIT_RIGHT) || KeyHeld(KA_UNIT_RIGHT_ALT))
+        ++turn;
+
+    g_ArcadeInput.m_Turn = (turn < 0) ? -1 : ((turn > 0) ? 1 : 0);
+
+    // Огонь — только когда фокус не в интерфейсе (как было в Takt).
+    g_ArcadeInput.m_Fire = KeyHeld(KA_FIRE) && (!g_IFaceList || g_IFaceList->m_InFocus != INTERFACE);
+
+    g_ArcadeInput.m_AimX = Float2Int(g_MatrixMap->m_TraceStopPos.x * INVERT(GLOBAL_SCALE_MOVE));
+    g_ArcadeInput.m_AimY = Float2Int(g_MatrixMap->m_TraceStopPos.y * INVERT(GLOBAL_SCALE_MOVE));
+}
+
+// Раз в такт: отправить состояние командой, если оно изменилось. Доставка
+// надёжная (ACK + перепосылка), поэтому «только на изменение» ничего не теряет;
+// иначе это было бы сто команд в секунду на ровном месте.
+void ArcadeInputTick(void) {
+    static int s_last[5] = {-1000, 0, 0, 0, 0};
+
+#ifdef MATRIXGAME_SIM_HARNESS
+    if (SimCommandBotEnabled()) {
+        return;
+    }
+#endif
+
+    if (!g_MatrixMap) {
+        return;
+    }
+
+    CMatrixSideUnit *ps = g_MatrixMap->GetPlayerSide();
+    if (!ps || !ps->IsRobotMode()) {
+        s_last[0] = -1000;  // вне аркады следующее состояние считаем новым
+        g_ArcadeInput.m_MouseTurn = 0;
+        return;
+    }
+
+    const int cur[5] = {g_ArcadeInput.m_Turn, g_ArcadeInput.m_Move, g_ArcadeInput.m_Fire ? 1 : 0, g_ArcadeInput.m_AimX,
+                        g_ArcadeInput.m_AimY};
+
+    if (memcmp(cur, s_last, sizeof(cur)) == 0)
+        return;
+
+    SCommand c;
+    ZeroMemory(&c, sizeof(c));
+    c.m_Type = CMD_ARCADE_CONTROL;
+    c.m_Side = ps->m_Id;
+    c.m_ObjId = -1;
+    for (int i = 0; i < 5; ++i)
+        c.m_Param[i] = cur[i];
+
+    CmdIssue(c);
+
+    memcpy(s_last, cur, sizeof(cur));
+    g_ArcadeInput.m_MouseTurn = 0;
+}
+
+int CmdArcadeEnter(CMatrixSideUnit *su, CMatrixMapStatic *robot) {
+    if (!su || !robot)
+        return -1;
+
+    if (!g_InitDone) {
+        su->SetArcadedObject(robot);
+        return -1;
+    }
+
+    SCommand c;
+    ZeroMemory(&c, sizeof(c));
+    c.m_Type = CMD_ARCADE_ENTER;
+    c.m_Side = su->m_Id;
+    c.m_ObjId = (int)robot->GetId();
+    CmdIssue(c);
+    return c.m_Tick;
+}
+
+int CmdArcadeLeave(CMatrixSideUnit *su) {
+    if (!su)
+        return -1;
+
+    if (!g_InitDone) {
+        su->SetArcadedObject(NULL);
+        return -1;
+    }
+
+    SCommand c;
+    ZeroMemory(&c, sizeof(c));
+    c.m_Type = CMD_ARCADE_LEAVE;
+    c.m_Side = su->m_Id;
+    c.m_ObjId = -1;
+    CmdIssue(c);
+    return c.m_Tick;
 }
 
 bool CmdReplayMode(void) {

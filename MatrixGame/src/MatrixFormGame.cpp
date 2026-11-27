@@ -233,6 +233,10 @@ void CFormMatrixGame::Takt(int step) {
     if (g_MatrixMap->CheckLostDevice())
         return;
 
+    // Ручное управление: собрать клавиши и курсор один раз на кадр. Дальше ввод
+    // уходит командами по тактам, а не читается из мира.
+    ArcadeInputSample();
+
     // Логика идёт целыми тактами по LOGIC_TAKT_PERIOD, а остаток копится между
     // кадрами. Раньше сюда приходил измеренный шаг, и CMatrixMapLogic::Takt сам
     // дробил его на куски: при 60 fps получалось 16 мс за кадр вместо ровных
@@ -540,12 +544,14 @@ void CFormMatrixGame::MouseMove(int x, int y) {
 
         // SetCursorPos(p.x, p.y);
 
+        // Поворот корпуса мышью копится до такта: раньше здесь ставился бит,
+        // который жил один кадр, и скорость поворота зависела от fps.
         if (p_side->GetArcadedObject()) {
             int dx = x - g_MatrixMap->m_Cursor.GetPosX();
             if (dx < 0)
-                p_side->GetArcadedObject()->AsRobot()->RotateRobotLeft();
+                ArcadeInputMouseTurn(-1);
             if (dx > 0)
-                p_side->GetArcadedObject()->AsRobot()->RotateRobotRight();
+                ArcadeInputMouseTurn(1);
         }
 
         g_MatrixMap->m_Cursor.SetPos(x, y);
@@ -1260,10 +1266,10 @@ void CFormMatrixGame::Keyboard(bool down, int scan) {
         else {
             CMatrixSideUnit *ps = g_MatrixMap->GetPlayerSide();
             if (!FLAG(g_IFaceList->m_IfListFlags, ORDERING_MODE) /*!IS_PREORDERING_NOSELECT*/) {
-                //Если мы не в режиме приказа
+                // Если мы не в режиме приказа
 
                 if (ps->GetCurGroup() && (ps->m_CurrSel == ROBOT_SELECTED || ps->m_CurrSel == GROUP_SELECTED)) {
-                    //Стратегический режим - выбрана группа
+                    // Стратегический режим - выбрана группа
                     if (((GetAsyncKeyState(g_Config.m_KeyActions[KA_UNIT_ENTER]) & 0x8000) == 0x8000) ||
                         ((GetAsyncKeyState(g_Config.m_KeyActions[KA_UNIT_ENTER_ALT]) & 0x8000) == 0x8000)) {
                         //"Esc", "Пробел","Enter" - Войти и выйти из робота.
@@ -1346,7 +1352,7 @@ void CFormMatrixGame::Keyboard(bool down, int scan) {
                     }
                 }
                 else if (ps->m_CurrSel == BUILDING_SELECTED || ps->m_CurrSel == BASE_SELECTED) {
-                    //Стратегический режим - выбрана База\Завод
+                    // Стратегический режим - выбрана База\Завод
                     CMatrixBuilding *bld = (CMatrixBuilding *)ps->m_ActiveObject;
 
                     if (bld->IsBase() && !ps->m_ConstructPanel->IsActive() &&
@@ -1477,12 +1483,12 @@ void CFormMatrixGame::Keyboard(bool down, int scan) {
                 }
             }
             else {
-                //Если мы в режиме приказа или постройки пушки
+                // Если мы в режиме приказа или постройки пушки
 
                 if (FLAG(g_IFaceList->m_IfListFlags, ORDERING_MODE) &&
                     FLAG(g_IFaceList->m_IfListFlags, PREORDER_BUILD_TURRET) && ps->m_CurrentAction != BUILDING_TURRET) {
                     // player_side->IsEnoughResources(g_Config.m_CannonsProps[1].m_Resources)
-                    //Меню выбора турелей:
+                    // Меню выбора турелей:
                     if (((GetAsyncKeyState(g_Config.m_KeyActions[KA_TURRET_CANNON]) & 0x8000) == 0x8000)) {
                         //"C"annon - Турель
                         g_IFaceList->BeginBuildTurret(1);
@@ -1502,7 +1508,7 @@ void CFormMatrixGame::Keyboard(bool down, int scan) {
                 }
 
                 if (((GetAsyncKeyState(g_Config.m_KeyActions[KA_ORDER_CANCEL]) & 0x8000) == 0x8000)) {
-                    //Канцел
+                    // Канцел
                     if (ps->m_CurrentAction == BUILDING_TURRET) {
                         ps->m_CannonForBuild.Delete();
                         ps->m_CurrentAction = NOTHING_SPECIAL;
@@ -1510,13 +1516,13 @@ void CFormMatrixGame::Keyboard(bool down, int scan) {
                     g_IFaceList->ResetOrderingMode();
                 }
             }
-            //Общее для стратегического режима
+            // Общее для стратегического режима
             if (((GetAsyncKeyState(g_Config.m_KeyActions[KA_MINIMAP_ZOOMIN]) & 0x8000) == 0x8000)) {
-                //приблизить карту
+                // приблизить карту
                 g_MatrixMap->m_Minimap.ButtonZoomIn(NULL);
             }
             else if (((GetAsyncKeyState(g_Config.m_KeyActions[KA_MINIMAP_ZOOMOUT]) & 0x8000) == 0x8000)) {
-                //отдалить карту
+                // отдалить карту
                 g_MatrixMap->m_Minimap.ButtonZoomOut(NULL);
             }
             else if (((GetAsyncKeyState(g_Config.m_KeyActions[KA_ORDER_ROBOT_SWITCH1]) & 0x8000) == 0x8000)) {

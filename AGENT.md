@@ -198,6 +198,7 @@ Environment switches:
 | `MATRIXGAME_CMDREPLAY` | load a command log and apply it instead of generating commands |
 | `MATRIXGAME_CMDBOT` | scripted player: issue an order for the player side every N ticks |
 | `MATRIXGAME_CMDBOT_ALL` | with `CMDBOT`: the bot plays every human-controlled side (offline reference for a two-sided match) |
+| `MATRIXGAME_ARCADEBOT` | autopilot for arcade mode: every 400 ticks the bot enters a robot, turns, drives, fires and leaves |
 | `MATRIXGAME_NET` | enable the UDP layer (phase 3) |
 | `MATRIXGAME_NET_PORT` / `MATRIXGAME_NET_BIND` | socket port and bind address; loopback by default |
 | `MATRIXGAME_NET_PEER` | `host:port` — this process greets that host instead of listening |
